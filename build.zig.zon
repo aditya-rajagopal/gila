@@ -1,0 +1,12 @@
+.{
+    .name = .gila,
+    .version = "0.0.0",
+    .fingerprint = 0x334e956c02fc7ad4, // Changing this has security and trust implications.
+    .minimum_zig_version = "0.16.0-dev.923+06d9e3bc0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

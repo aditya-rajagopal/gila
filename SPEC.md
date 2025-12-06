@@ -1,8 +1,8 @@
 # GILA
 
-- VERSION: 0.0.1
-- STATUS: DRAFT
-- DATE: 2025-12-05
+> VERSION: 0.0.1
+> STATUS: DRAFT
+> DATE: 2025-12-05
 
 ## Abstract
 
@@ -26,13 +26,13 @@ portable and lightweight specification for creating and managing tasks.
 GILA is a specification and not a specific tool.
 
 GILA is designed to be
-    * Local plain-text: All the artifacts are meant to be local and human readable and commitable to remote repositories.
-    * Simple and portable. Anyone should be able to create tools to read and manage these files in any development environement
-    * Flexible: Should be extendable in the future when new needs pop up
-    * Extensible: Should be able to add new features in the future by anyone
+* Local plain-text: All the artifacts are meant to be local and human readable and commitable to remote repositories.
+* Simple and portable. Anyone should be able to create tools to read and manage these files in any development environement
+* Flexible: Should be extendable in the future when new needs pop up
+* Extensible: Should be able to add new features in the future by anyone
 
-GILA is *NOT* designed to be
-    * Generic: It is not meant to be a generic task tracking system without extensions designed for specific needs
+GILA is ***NOT*** designed to be
+* Generic: It is not meant to be a generic task tracking system without extensions designed for specific needs
 
 The specification gives definitions of the format for the file tree, naming conventions, and the structure of the files.
 Additionally there may be suggestions for task generation and parsing tools. Rationale for these will be provided when possible, 

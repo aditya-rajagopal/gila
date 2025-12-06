@@ -20,3 +20,9 @@
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⢶⢿⣿⣿⡟⠀⢸⣿⣿⣿⡆⠴⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠚⠚⠚⠚⠘⠛⠉⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
 ```
+
+## Introduction
+
+ GILA is designed to be a specification for a local plain-text task tracking system for developers. A CLI tool with the same
+name is being developed to read and manage these tasks as an example implementation. See the [specification](SPEC.md) for more
+information.

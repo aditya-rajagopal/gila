@@ -56,7 +56,7 @@ pub const DateTimeUTC = packed struct(u64) {
         datetime: DateTimeUTC,
         comptime fmt: []const u8,
         options: std.fmt.Options,
-        writer: anytype,
+        writer: *std.Io.Writer,
     ) !void {
         _ = fmt;
         _ = options;
@@ -80,12 +80,37 @@ pub const DateTimeUTC = packed struct(u64) {
     }
 };
 
-pub const Priority = union(enum) {
-    low: u8,
-    medium: u8,
-    high: u8,
-    urgent: u8,
+pub const Priority = enum {
+    low,
+    medium,
+    high,
+    urgent,
 };
+
+pub const description_header_template =
+    \\# {s}
+    \\
+    \\- status: {s}
+    \\- priority: {s}, {d}
+    \\- owner: {s}
+    \\- created: 
+;
+
+pub const description_compeleted_template =
+    \\- completed: {s}
+;
+
+pub const description_tags_template =
+    \\- tags: 
+;
+
+pub const description_body_template =
+    \\
+    \\
+    \\# Description
+    \\
+    \\{s}
+;
 
 pub const Tag = []const u8;
 

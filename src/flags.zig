@@ -18,6 +18,8 @@ const assert = std.debug.assert;
 
 const log = std.log.scoped(.args_parser);
 
+const MAX_ARGS = 128;
+
 /// Parse CLI arguments for subcommands specified as Zig `struct` or `union(enum)`:
 ///
 /// ```
@@ -203,7 +205,8 @@ fn parseFlags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 
     var parsed_args: usize = 0;
 
-    parsing_next_arg: while (args.next()) |arg| {
+    parsing_next_arg: for (0..MAX_ARGS) |_| {
+        const arg = args.next() orelse break :parsing_next_arg;
         if (@hasDecl(Flags, "help") and parsed_args == 0) {
             if (std.mem.eql(u8, arg, "-h") or std.mem.eql(u8, arg, "--help")) {
                 var interface = std.fs.File.stdout().writer(&.{}).interface;
@@ -248,11 +251,16 @@ fn parseFlags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
                     continue :parsing_next_arg;
                 },
                 else => {
-                    // @NOTE This will cause excess posistional arguments to fall through to the error.
+                    // @NOTE This will cause excess posistional arguments to fall through to the error as it is essentially an unexpected argument
                 },
             }
         }
         logFatal("Unexpected argument '{s}'", .{arg});
+    } else {
+        logFatal("Struct '{s}' has too many fields. Current maximum is {d}. If you really need more(why) just increase MAX_ARGS in flags.zig", .{
+            @typeName(Flags),
+            MAX_ARGS,
+        });
     }
 
     // @NOTE We now go through all the fields and check if any have not been set and set them to their default values.
@@ -293,7 +301,7 @@ fn parseFlags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
 fn parseFlag(comptime Flag: type, flag_name: []const u8, arg: [:0]const u8) Flag {
     assert(flag_name[0] == '-');
     assert(flag_name[1] == '-');
-    assert(std.mem.startsWith(u8, flag_name, arg));
+    assert(std.mem.startsWith(u8, arg, flag_name));
 
     if (Flag == bool) {
         if (std.mem.eql(u8, flag_name, arg)) {

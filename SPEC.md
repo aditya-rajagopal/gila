@@ -45,11 +45,9 @@ though it is not required.
 * **Status**: A state a **Task** can be in. Can be one of `TODO`, `DONE`, `IN_PROGRESS`, `CANCELLED`, or `WAITING`.
 * **Description**: A structured description of a **Task**.
 * **Tags**: A list of words that can be used to categorize **Tasks**.
-* **Due Date**: The date when the task is due.
 * **Priority**: The priority of the task. Can be one of `LOW`, `MEDIUM`, `HIGH`, or `URGENT`. Can also have an optional integer value.
 * **Created Date**: The date when the task artifact was created.
 * **Completed Date**: The date when the task was completed.
-* **Started Date**: The date when the task was started.
 * **Comments**: A list of comments for the task that track progress and other information.
 * **Owner**: The person who owns the task.
 
@@ -134,12 +132,9 @@ Each **Task** Folder contains a file called `description.md`. The file **must** 
 - priority: <LOW|MEDIUM|HIGH|URGENT>, <optional integer value>
 - owner: <Owner>
 - created: YYYY-MM-DD HH:MM:SS
-- started: YYYY-MM-DD HH:MM:SS (only if status is not TODO)
-- started_by: <User> (only if status is not TODO)
 - completed: YYYY-MM-DD HH:MM:SS (only if status is DONE or CANCELLED)
 - waiting_on: [<TaskRef1>, <TaskRef2>, ...] (only if status is WAITING)
 <optional fields>
-- due: <YYYY-MM-DD HH:MM:SS|string>
 - tags: [<Tag1>, <Tag2>, ...]
 </optional fields>
 
@@ -149,12 +144,10 @@ Each **Task** Folder contains a file called `description.md`. The file **must** 
 There are fields that **must** be present in the **Description** that are situationally:
 
 * `waiting_on`: only present if the task is in the `WAITING` status. This contains a list of **Task**s that need to be completed before this task can be completed. 
-* `started_by` and `started`: only present if the task is not in the `TODO` status.
 * `completed`: only present if the task is in the `DONE` or `CANCELLED` status. 
 
 There are optional fileds that need not be present at all to be a valid **Description**:
 
-* `due`: The time when the task is due. Not all tasks need to have a due date. This can also take a version tag(`v1.3`) or an event like `alpha`, `beta`, `rc`, etc.
 * `tags`: A list of tags that are comma seperated that can be used to categorize tasks.
 
 ### Comments

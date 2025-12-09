@@ -12,12 +12,15 @@ pub const std_options: std.Options = .{
     .logFn = logFn,
 };
 
+var log_level: std.log.Level = std.log.Level.info;
+
 pub fn logFn(
     comptime level: std.log.Level,
     comptime scope: @Type(.enum_literal),
     comptime format: []const u8,
     args: anytype,
 ) void {
+    if (@intFromEnum(level) > @intFromEnum(log_level)) return;
     const level_text = comptime level.asText();
     const scope_prefix = if (scope == .gila) ": " else "(" ++ @tagName(scope) ++ "): ";
     const date_time = DateTimeUTC.now();
@@ -179,7 +182,6 @@ pub fn main() !void {
                 }) |entry| {
                     if (entry.kind == .directory) {
                         if (std.mem.eql(u8, entry.name, gila.dir_name)) {
-                            log.info("Found .gila directory: {s}/{s}", .{ current_dir, entry.name });
                             break :outter_loop;
                         }
                     }
@@ -229,7 +231,6 @@ pub fn main() !void {
                 user_name,
             });
 
-            log.info("Creating task: {s}", .{task_name});
             todo_dir.makeDir(task_name) catch |err| switch (err) {
                 error.PathAlreadyExists => {
                     @branchHint(.unlikely);
@@ -284,7 +285,7 @@ pub fn main() !void {
                 };
             }
 
-            // @NOTE I never forget to flush
+            // @IMPORTANT I never forget to flush
             interface.flush() catch |err| {
                 log.err("Failed to flush description.md: {s}", .{@errorName(err)});
                 return;
@@ -294,6 +295,8 @@ pub fn main() !void {
                 log.err("Failed to sync description.md: {s}", .{@errorName(err)});
                 return;
             };
+
+            log.info("New task created at: {s}/TODO/{s}/description.md", .{ current_dir, task_name });
 
             return;
         },

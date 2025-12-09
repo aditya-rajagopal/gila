@@ -2,8 +2,14 @@
 //!
 //! It is pretty much taken from the tigerbeetle project.
 //! https://github.com/tigerbeetle/tigerbeetle/blob/16d62f0ce7d4ef3db58714c9b7a0c46480c19bc3/src/flags.zig
-//! and modified to fit my needs and my coding style.
-//! eg. I removed a lot of comptime asserts and made them @compileError's instead as I prefer the more human readable
+//!
+//! I modified to fit my needs and my coding style and, subjectively, made it better for me.
+//! eg.
+//! * I removed a lot of comptime asserts and made them @compileError's instead as I prefer the more human readable error messages
+//! * I added help flags to commands in addition to the help flag for the program
+//! * I prefer the zig style nameing convention for function names as i like to do things like `const default_value = defaultValue(xyz);`
+//! * Added floating point numbers
+//!
 //! error messages.
 
 // @TODO: Add tests
@@ -185,7 +191,7 @@ fn parseFlags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
                         logFatal("Unexpected argument '{s}'", .{arg});
                     }
                     parsed_positional = true;
-                    @field(result.positional, positional_field.name) = parseFlagValue(positional_field.type, "<" ++ positional_field.name, arg);
+                    @field(result.positional, positional_field.name) = parseFlagValue(positional_field.type, "positional." ++ positional_field.name, arg, true);
 
                     continue :parsing_next_arg;
                 },
@@ -261,11 +267,11 @@ fn parseFlag(comptime Flag: type, flag_name: []const u8, arg: [:0]const u8) Flag
         }
         break :split_value result;
     };
-    return parseFlagValue(Flag, flag_name, value);
+    return parseFlagValue(Flag, flag_name, value, false);
 }
 
-fn parseFlagValue(comptime Flag: type, flag_name: []const u8, flag_value: [:0]const u8) Flag {
-    assert((flag_name[0] == '-' and flag_name[1] == '-') or (flag_name[0] == '<'));
+fn parseFlagValue(comptime Flag: type, flag_name: []const u8, flag_value: [:0]const u8, comptime is_positional: bool) Flag {
+    assert((flag_name[0] == '-' and flag_name[1] == '-') or is_positional);
     assert(flag_value.len > 0);
     assert(Flag != bool);
 

@@ -18,7 +18,56 @@ const assert = std.debug.assert;
 
 const log = std.log.scoped(.args_parser);
 
+/// Parse CLI arguments for subcommands specified as Zig `struct` or `union(enum)`:
+///
+/// ```
+/// const CLIArgs = union(enum) {
+///    init: struct {
+///        bare: bool = false,
+///        positional: struct {
+///            directory: ?[]const u8 = null,
+///        },
+///
+///        pub const help =
+///            \\Usage: program init [--bare] [<directory>]
+///            \\
+///            \\Description
+///            \\
+///            \\Options:
+///            \\  --bare  Creates a bare project without subfolders and tracking files.
+///            \\  <directory>  The directory to initialize the project in. Defaults to the current directory.
+///            \\
+///         ;
+///    },
+///
+///    pub const help =
+///        \\Usage:
+///        \\
+///        \\    program [-h | --help]
+///        \\
+///        \\    program init [-h | --help] [--bare] [<directory>]
+///        \\
+///        \\Commands:
+///        \\    init  Initializes a new program project in the current directory or the specified directory.
+///        \\
+///        \\Options:
+///        \\    -h, --help
+///        \\        Prints this help message.
+///        \\
+///     ;
+/// }
+///
+/// const cli_args: CLIArgs = parse_commands(&args, CLIArgs);
+/// ```
+///
+/// `positional` field is treated specially, it designates positional arguments.
+///
+/// If `pub const help` declaration is present, it is used to implement `-h/--help` argument.
+///
+/// @TODO Value parsing can be customized on per-type basis via `parse_flag_value` customization point.
+/// @TODO More documentation for the requirements of `ArgType`.
 pub fn parseArgs(args: *std.process.ArgIterator, comptime ArgType: type) ArgType {
+    // @NOTE: Skip the first argument, which is the program name.
     assert(args.skip());
     return parseFlags(args, ArgType);
 }
@@ -73,6 +122,9 @@ fn parseCommand(args: *std.process.ArgIterator, comptime Command: type) Command 
 
 fn parseFlags(args: *std.process.ArgIterator, comptime Flags: type) Flags {
     if (Flags == void) {
+        if (args.next()) |arg| {
+            logFatal("Unexpected argument '{s}'", .{arg});
+        }
         return {};
     }
 

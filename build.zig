@@ -1,6 +1,9 @@
 const std = @import("std");
 
 pub fn build(b: *std.Build) void {
+    // @NOTE Setting this to a higher value by default helps with debugging a lot
+    b.reference_trace = 16;
+
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
@@ -17,6 +20,7 @@ pub fn build(b: *std.Build) void {
         .name = "gila",
         .root_module = exe_mod,
     });
+    exe.stack_size = 2 * 1024 * 1024; // Asking for 2MB of stack
 
     b.installArtifact(exe);
 
@@ -29,18 +33,20 @@ pub fn build(b: *std.Build) void {
         run_cmd.addArgs(args);
     }
 
-    const mod_tests = b.addTest(.{
-        .root_module = mod,
-    });
-    const run_mod_tests = b.addRunArtifact(mod_tests);
-    const exe_tests = b.addTest(.{
-        .root_module = exe.root_module,
-    });
-    const run_exe_tests = b.addRunArtifact(exe_tests);
+    {
+        const mod_tests = b.addTest(.{
+            .root_module = mod,
+        });
+        const run_mod_tests = b.addRunArtifact(mod_tests);
+        const exe_tests = b.addTest(.{
+            .root_module = exe.root_module,
+        });
+        const run_exe_tests = b.addRunArtifact(exe_tests);
 
-    const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&run_mod_tests.step);
-    test_step.dependOn(&run_exe_tests.step);
+        const test_step = b.step("test", "Run tests");
+        test_step.dependOn(&run_mod_tests.step);
+        test_step.dependOn(&run_exe_tests.step);
+    }
 
     const check_exe = b.addExecutable(.{ .name = "check", .root_module = exe_mod });
     const check_step = b.step("check", "Run ast check");

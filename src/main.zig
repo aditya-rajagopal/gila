@@ -254,11 +254,11 @@ pub fn main() !void {
             };
             defer description_file.close();
 
-            // var buffer: [4096]u8 = undefined;
+            var buffer: [4096]u8 = undefined;
+            var writer = description_file.writer(&buffer);
+            const interface: *std.Io.Writer = &writer.interface;
 
-            var writer = description_file.writer(&.{}).interface;
-
-            writer.print(gila.description_header_template, .{
+            interface.print(gila.description_header_template, .{
                 add.positional.title,
                 @tagName(.todo),
                 @tagName(add.priority),
@@ -268,24 +268,24 @@ pub fn main() !void {
                 log.err("Failed to write to description.md: {s}", .{@errorName(err)});
                 return;
             };
-            date_time.format("", .{}, &writer) catch |err| {
+            date_time.format("", .{}, interface) catch |err| {
                 log.err("Failed to write to description.md: {s}", .{@errorName(err)});
                 return;
             };
             if (add.description) |description| {
-                writer.print(gila.description_body_template, .{description}) catch |err| {
+                interface.print(gila.description_body_template, .{description}) catch |err| {
                     log.err("Failed to write to description.md: {s}", .{@errorName(err)});
                     return;
                 };
             } else {
-                writer.print(gila.description_body_template, .{""}) catch |err| {
+                interface.print(gila.description_body_template, .{""}) catch |err| {
                     log.err("Failed to write to description.md: {s}", .{@errorName(err)});
                     return;
                 };
             }
 
             // @NOTE I never forget to flush
-            writer.flush() catch |err| {
+            interface.flush() catch |err| {
                 log.err("Failed to flush description.md: {s}", .{@errorName(err)});
                 return;
             };

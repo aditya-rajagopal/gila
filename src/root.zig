@@ -110,6 +110,7 @@ pub const description_body_template =
     \\# Description
     \\
     \\{s}
+    \\
 ;
 
 pub const Tag = []const u8;

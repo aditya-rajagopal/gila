@@ -72,6 +72,10 @@ const CLIArgs = union(enum) {
             \\    --description=<description>  The description of the task.
             \\    <title>  The title of the task.
             \\
+            \\Examples:
+            \\    gila add --priority=low --priority-value=50 --description="This is a description" 'Title of the task'
+            \\    gila add --priority-value=200 'Title of the task'
+            \\
         ;
     };
 
@@ -92,6 +96,10 @@ const CLIArgs = union(enum) {
             \\  --bare  Creates a bare project without subfolders and tracking files.
             \\  <directory>  The directory to initialize the project in. Defaults to the current directory.
             \\
+            \\Examples:
+            \\    gila init
+            \\    gila init some/directory/path
+            \\
         ;
     };
 
@@ -102,12 +110,20 @@ const CLIArgs = union(enum) {
         \\
         \\    gila init [-h | --help] [--bare] [<directory>]
         \\
+        \\    gila add [-h | --help] [--priority=<priority>] [--priority-value=<value>] [--description=<description>] <title>
+        \\
         \\Commands:
         \\    init  Initializes a new GILA project in the current directory or the specified directory.
+        \\    add   Adds a new task to the current project.
         \\
         \\Options:
         \\    -h, --help
         \\        Prints this help message.
+        \\
+        \\Examples:
+        \\    gila init
+        \\    gila init some/directory/path
+        \\    gila add --priority=low --priority-value=50 --description="This is a description" 'Title of the task'
         \\
     ;
 };

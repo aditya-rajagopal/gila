@@ -34,8 +34,8 @@ pub fn logFn(
         }
         break :blk result;
     };
-    const scope_prefix = if (scope == .gila) ": " else "(" ++ @tagName(scope) ++ "): ";
-    const date_time = DateTimeUTC.now();
+    const scope_prefix = "(" ++ @tagName(scope) ++ "): ";
+    // const date_time = DateTimeUTC.now();
 
     const writer = if (level != .err) blk: {
         var stdout_writer = std.fs.File.stdout().writer(&.{});
@@ -49,8 +49,9 @@ pub fn logFn(
     };
 
     nosuspend {
-        date_time.format("", .{}, writer) catch return;
-        writer.print(" " ++ level_text ++ scope_prefix ++ format ++ "\n", args) catch return;
+        // date_time.format("", .{}, writer) catch return;
+        // " " ++
+        writer.print(level_text ++ scope_prefix ++ format ++ "\n", args) catch return;
     }
     if (level == .err) {
         std.debug.unlockStdErr();

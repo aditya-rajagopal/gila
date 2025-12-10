@@ -1,4 +1,5 @@
 const std = @import("std");
+const root = @import("root");
 
 const gila = @import("gila");
 const stdx = @import("stdx");
@@ -6,6 +7,7 @@ const stdx = @import("stdx");
 const log = std.log.scoped(.gila);
 
 bare: bool = false,
+verbose: bool = false,
 positional: struct {
     directory: ?[]const u8 = null,
 },
@@ -13,24 +15,30 @@ positional: struct {
 pub const help =
     \\Usage: 
     \\
-    \\    gila init [--bare] [<directory>]
+    \\    gila init [--bare] [--verbose] [<directory>]
     \\
     \\Initializes a new GILA project in the current directory or the specified directory.
     \\
     \\Options:
-    \\  --bare
-    \\      Creates a bare project without subfolders and tracking files.
+    \\    --bare
+    \\        Creates a bare project without subfolders and tracking files.
     \\
-    \\  <directory>
-    \\      The directory to initialize the project in. Defaults to the current directory.
+    \\    --verbose 
+    \\        Run verbosely.
+    \\
+    \\    <directory>
+    \\        The directory to initialize the project in. Defaults to the current directory.
     \\
     \\Examples:
     \\    gila init
-    \\    gila init some/directory/path
+    \\    gila init --verbose some/directory/path
     \\
 ;
 
 pub fn execute(self: @This(), arena: *stdx.Arena) void {
+    if (!self.verbose) {
+        root.log_level = .warn;
+    }
     const allocator = arena.allocator();
     const buffer: []u8 = allocator.alloc(u8, std.fs.max_path_bytes) catch unreachable;
 
@@ -53,6 +61,8 @@ pub fn execute(self: @This(), arena: *stdx.Arena) void {
     };
     defer dir.close();
 
+    std.log.info("Opened directory {s}", .{current_dir});
+
     dir.makeDir(gila.dir_name) catch |err| {
         switch (err) {
             error.PathAlreadyExists => {
@@ -65,7 +75,11 @@ pub fn execute(self: @This(), arena: *stdx.Arena) void {
             },
         }
     };
-    log.info("Initialized GILA project: {s}/{s}", .{ current_dir, gila.dir_name });
+    defer {
+        var stdout = std.fs.File.stdout().writer(&.{});
+        stdout.interface.print("Initialized GILA project: {s}/{s}\n", .{ current_dir, gila.dir_name }) catch unreachable;
+    }
+
     if (self.bare) {
         return;
     }
@@ -80,6 +94,7 @@ pub fn execute(self: @This(), arena: *stdx.Arena) void {
         log.err("Unexpected error while creating TODO folder: {s}", .{@errorName(err)});
         unreachable;
     };
+    std.log.info("Successfully created TODO folder", .{});
 
     return;
 }

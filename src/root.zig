@@ -1,8 +1,10 @@
 const std = @import("std");
+const builtin = @import("builtin");
+const stdx = @import("stdx");
 const assert = std.debug.assert;
 
+pub const logo = @embedFile("ascii.txt");
 pub const dir_name = ".gila";
-
 pub const description_file_name = "description.md";
 pub const comments_file_name = "comments.md";
 
@@ -15,68 +17,29 @@ pub const Status = union(enum(u8)) {
 };
 
 pub const TaskId = struct {
-    date_time: DateTimeUTC,
+    date_time: stdx.DateTimeUTC,
     user_name: []const u8,
-};
 
-// https://github.com/tigerbeetle/tigerbeetle/blob/16d62f0ce7d4ef3db58714c9b7a0c46480c19bc3/src/stdx.zig#L985
-pub const DateTimeUTC = packed struct(u64) {
-    year: u16,
-    month: u8,
-    day: u8,
-    hour: u8,
-    minute: u8,
-    second: u6,
-    millisecond: u10,
-
-    pub fn now() DateTimeUTC {
-        const timestamp_ms = std.time.milliTimestamp();
-        assert(timestamp_ms > 0);
-        return DateTimeUTC.from_timestamp_ms(@intCast(timestamp_ms));
+    pub fn new(gpa: std.mem.Allocator) std.process.GetEnvVarOwnedError!TaskId {
+        var result: TaskId = undefined;
+        result.date_time = stdx.DateTimeUTC.now();
+        const user_env = if (builtin.os.tag == .windows) "USERNAME" else "USER";
+        result.user_name = try std.process.getEnvVarOwned(gpa, user_env);
+        return result;
     }
 
-    pub fn from_timestamp_ms(timestamp_ms: u64) DateTimeUTC {
-        const epoch_seconds = std.time.epoch.EpochSeconds{ .secs = @divTrunc(timestamp_ms, 1000) };
-        const year_day = epoch_seconds.getEpochDay().calculateYearDay();
-        const month_day = year_day.calculateMonthDay();
-        const time = epoch_seconds.getDaySeconds();
-
-        return DateTimeUTC{
-            .year = year_day.year,
-            .month = month_day.month.numeric(),
-            .day = month_day.day_index + 1,
-            .hour = time.getHoursIntoDay(),
-            .minute = time.getMinutesIntoHour(),
-            .second = time.getSecondsIntoMinute(),
-            .millisecond = @intCast(@mod(timestamp_ms, 1000)),
-        };
+    pub fn fromString(str: []const u8) TaskId {
+        var result: TaskId = undefined;
+        // @NOTE string for taskId must start with YYYYMMDD_HHMMSS_ followed by username
+        assert(str.len >= 15);
+        result.date_time = .fromString(str[0..15]);
+        assert(str[15] == '_');
+        result.user_name = str[16..];
+        return result;
     }
 
-    pub fn format(
-        datetime: DateTimeUTC,
-        comptime fmt: []const u8,
-        options: std.fmt.Options,
-        writer: *std.Io.Writer,
-    ) !void {
-        _ = fmt;
-        _ = options;
-        try writer.print("{d:0>4}-{d:0>2}-{d:0>2} {d:0>2}:{d:0>2}:{d:0>2}.{d:0>3}Z", .{
-            datetime.year,
-            datetime.month,
-            datetime.day,
-            datetime.hour,
-            datetime.minute,
-            datetime.second,
-            datetime.millisecond,
-        });
-    }
-
-    pub fn dateAsNumber(self: DateTimeUTC) u32 {
-        return @as(u32, self.year) * 10000 + @as(u32, self.month) * 100 + @as(u32, self.day);
-    }
-
-    pub fn timeAsNumber(self: DateTimeUTC) u32 {
-        return @as(u32, self.hour) * 10000 + @as(u32, self.minute) * 100 + @as(u32, self.second);
+    pub fn format(self: TaskId, writer: *std.Io.Writer) !void {
+        try writer.print("{d}_{d}_{s}", .{ self.date_time.dateAsNumber(), self.date_time.timeAsNumber(), self.user_name });
     }
 };
 
@@ -93,7 +56,7 @@ pub const description_header_template =
     \\- status: {s}
     \\- priority: {s}, {d}
     \\- owner: {s}
-    \\- created: 
+    \\- created: {f}
 ;
 
 pub const description_compeleted_template =
@@ -110,31 +73,5 @@ pub const description_body_template =
     \\# Description
     \\
     \\{s}
-    \\
-;
-
-pub const Tag = []const u8;
-
-pub const logo =
-    \\⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣰⠏⣀⡤⠀⠀⠀⠀⠀
-    \\⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀ ⠀⠊⠀⠐⡪⠴⠃⠀⠀⠀⠀
-    \\⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠠⠊⠀⠀⣀⣠⠤⢴⣊⠉⠁⠀⠀⠀⠀
-    \\⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⡀⣀⣀⣾⣷⣶⠋⠉⠀⠀⠀⠈⠁⠀⠀⠀⠀⠀
-    \\⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣶⠿⣋⡉⠿⠿⠇⢰⣶⣦⣭⡍⠙⢶⣦⡤⣤⣴⣦⣤⡀⠀⠀⠀⠀
-    \\⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⣊⠈⢫⣵⣾⣿⣧⢰⣶⣿⢸⣿⣿⣿⡇⣼⣿⡶⣠⣿⣯⣟⣿⣿⣮⣄⠀⠀
-    \\⠀⠀⠀⠀⠀⠀⠀⠀⢀⣐⠋⠻⠟⢀⣄⢻⣿⣿⣿⣧⠉⠉⠘⣛⣛⡛⠃⢠⣬⡌⠿⠟⠿⠿⠿⢿⡿⠿⠈⠂
-    \\⠀⠀⠀⠀⠀⠀⠀⢠⣾⡿⣡⣶⣦⡻⠿⠃⠙⢛⣩⣴⣆⠀⠚⠿⢿⡿⣛⣼⣛⡳⣤⣄⡀⠀⢀⣀⣀⣀⡴⣣
-    \\⠀⠀⠀⠀⠀⠀⢀⠟⠛⢱⣿⣿⣿⣿⢗⡀⠀⠀⢻⡿⢛⠁⠀⠀⠈⠁⠠⡙⠶⡄⠀⠀⠉⠉⠉⠉⠁⠀⠀⠀
-    \\⢀⡀⡄⢀⡀⠀⠸⣼⣿⡇⣨⣽⡻⠏⣾⣿⣦⡠⠊⠀⠀⠑⠒⠋⠀⠑⣧⠘⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-    \\⡈⠣⡁⢜⡡⠆⢺⣦⢰⣶⣭⣭⠁⠀⠀⠉⡻⠁⠀⠀⠀⠀⠀⠀⠀⠀⠈⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-    \\⠙⢖⠀⠀⠘⠲⢸⣿⢸⣿⣿⣿⠀⣿⣿⡶⠁⠀⠀⠀⠀⠀⠀    ╭██████╮ ╭██╮╭██╮      ╭█████╮ 
-    \\⠀⠀⠙⠒⠐⢦⢠⣯⣈⡉⠉⢩⣤⣤⣭⠥⠤⣄⣄⠠⡄⠀⠀⠀⠀⠀⠀██╭════╯  ██║ ██║     ██╭═══██╮
-    \\⠀⠀⠀⠀⠀⠀⠙⢿⣿⣧⣤⣼⣿⣿⣿⢀⡀⠈⠋⠌⡥⡚⠀⠀⠀⠀⠀██║ ╭███╮ ██║ ██║     ███████║
-    \\⠀⠀⠀⠀⠀⠀⠀⠀⢻⠿⠿⠛⠛⢫⠉⠉⠘⢆⡀⢀⠒⠶⠆⠀⠀⠀⠀██║   ██║ ██║ ██║     ██╭═══██║
-    \\⠀⠀⠀⠀⠀⠀⠀⠀⠈⣄⣠⣴⣶⣿⣧⡀⠀⠀⠉⠀⠀⠀⠀⠀⠀⠀ ╰██████╯ ╭██║ ███████╮██║   ██║
-    \\⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⣿⣿⣿⡿⠋⢙⣦⣄⣀⠀⠀⠀⠀⠀⠀⠀⠀ ╰═════╯ ╰══╯╰═══════╯╰═╯   ╰═╯
-    \\⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⢟⡁⠀⢠⣾⣿⣿⠏⠉⣿⣿⣿⠛⢻⣿⡝⠂⠀⠀> local plain-text task tracking
-    \\⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⢶⢿⣿⣿⡟⠀⢸⣿⣿⣿⡆⠴⠋⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-    \\⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠉⠚⠚⠚⠚⠘⠛⠉⠉⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
     \\
 ;

@@ -37,6 +37,7 @@ pub const help =
     \\    --description=<description>
     \\
     \\        The description of the task.
+    \\
     \\    --verbose 
     \\        Run verbosely. Prints the contents of the task description file to stdout.
     \\
@@ -109,22 +110,13 @@ pub fn execute(self: @This(), arena: *stdx.Arena) void {
     defer todo_dir.close();
     log.info("Successfully opened or created TODO folder", .{});
 
-    const date_time = gila.DateTimeUTC.now();
-    const user_name = switch (builtin.os.tag) {
-        .windows => std.process.getEnvVarOwned(allocator, "USERNAME") catch |err| {
-            log.err("Failed to get USERNAME environment variable: {s}", .{@errorName(err)});
-            return;
-        },
-        else => std.process.getEnvVarOwned(allocator, "USER") catch |err| {
-            log.err("Failed to get USER environment variable: {s}", .{@errorName(err)});
-            return;
-        },
+    const task_id: gila.TaskId = gila.TaskId.new(allocator) catch |err| {
+        log.err("Failed to get user environment variable: {s}", .{@errorName(err)});
+        return;
     };
 
-    const task_name = std.fmt.allocPrint(allocator, "{d}_{d}_{s}", .{
-        date_time.dateAsNumber(),
-        date_time.timeAsNumber(),
-        user_name,
+    const task_name = std.fmt.allocPrint(allocator, "{f}", .{
+        task_id,
     }) catch |err| {
         log.err("Failed to allocate task name: {s}", .{@errorName(err)});
         return;
@@ -165,16 +157,13 @@ pub fn execute(self: @This(), arena: *stdx.Arena) void {
         @tagName(.todo),
         @tagName(self.priority),
         self.priority_value,
-        user_name,
+        task_id.user_name,
+        task_id.date_time,
     }) catch |err| {
         log.err("Failed to write to description.md: {s}", .{@errorName(err)});
         return;
     };
 
-    date_time.format("", .{}, interface) catch |err| {
-        log.err("Failed to write to description.md: {s}", .{@errorName(err)});
-        return;
-    };
     if (self.description) |description| {
         interface.print(gila.description_body_template, .{description}) catch |err| {
             log.err("Failed to write to description.md: {s}", .{@errorName(err)});

@@ -1,19 +1,14 @@
+// GILA is not meant to be imported as a library, but rather as a CLI tool. This is purely just for the stdx dependency.
 .{
     .name = .gila,
-    .version = "0.0.1",
+    .version = "0.1.0-dev",
     .fingerprint = 0x334e956c02fc7ad4, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0-dev.923+06d9e3bc0",
     .dependencies = .{
         .stdx = .{
-            .url = "git+https://github.com/aditya-rajagopal/stdx.git#6f84cbae6c117e6f6aed4b334bfb88a944177305",
-            .hash = "stdx-0.0.0-JEHEYSNDAQD7l2JfWNQY-sdpdh4gDWfFxEZN7B6cJbWS",
+            .url = "git+https://github.com/aditya-rajagopal/stdx.git#bcece39707bbde040d3fe4b6a827c0d65fe9c99b",
+            .hash = "stdx-0.0.0-JEHEYS9VAQC0USKgUL90nDTtnY53z35KL9q3rbZtl4Tk",
         },
     },
-    .paths = .{
-        "build.zig",
-        "build.zig.zon",
-        "src",
-        "LICENSE",
-        "README.md",
-    },
+    .paths = .{""},
 }

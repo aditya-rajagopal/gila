@@ -11,9 +11,16 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/root.zig"),
         .target = target,
     });
+    const zon_mod = b.addModule("zon", .{
+        .root_source_file = b.path("build.zig.zon"),
+        .target = target,
+    });
+    const stdx = b.dependency("stdx", .{}).module("stdx");
 
     const exe_mod = b.createModule(.{ .root_source_file = b.path("src/main.zig"), .target = target, .optimize = optimize, .imports = &.{
         .{ .name = "gila", .module = mod },
+        .{ .name = "zon", .module = zon_mod },
+        .{ .name = "stdx", .module = stdx },
     } });
 
     const exe = b.addExecutable(.{

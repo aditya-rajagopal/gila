@@ -1,12 +1,19 @@
 .{
     .name = .gila,
-    .version = "0.0.0",
+    .version = "0.0.1",
     .fingerprint = 0x334e956c02fc7ad4, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0-dev.923+06d9e3bc0",
-    .dependencies = .{},
+    .dependencies = .{
+        .stdx = .{
+            .url = "git+https://github.com/aditya-rajagopal/stdx.git#6f84cbae6c117e6f6aed4b334bfb88a944177305",
+            .hash = "stdx-0.0.0-JEHEYSNDAQD7l2JfWNQY-sdpdh4gDWfFxEZN7B6cJbWS",
+        },
+    },
     .paths = .{
         "build.zig",
         "build.zig.zon",
         "src",
+        "LICENSE",
+        "README.md",
     },
 }

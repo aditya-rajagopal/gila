@@ -32,7 +32,7 @@ pub const TaskId = struct {
         var result: TaskId = undefined;
         // @NOTE string for taskId must start with YYYYMMDD_HHMMSS_ followed by username
         assert(str.len >= 15);
-        result.date_time = .fromString(str[0..15]);
+        result.date_time = .fromString(str[0..15], .YYYYMMDD_HHMMSS);
         assert(str[15] == '_');
         result.user_name = str[16..];
         return result;

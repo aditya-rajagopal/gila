@@ -21,10 +21,10 @@ positional: struct {
 pub const help =
     \\Usage:
     \\
-    \\    gila add [--priority=low|medium|high|urgent] [--priority-value=<value>] 
+    \\    gila create [--priority=low|medium|high|urgent] [--priority-value=<value>] 
     \\              [--description=<description>] [--verbose] <title>
     \\
-    \\Adds a new task to the current project.
+    \\Create a new task to the current project.
     \\
     \\Options:
     \\    -h, --help
@@ -47,8 +47,8 @@ pub const help =
     \\        The title of the task.
     \\
     \\Examples:
-    \\    gila add --priority=low --priority-value=50 --description="This is a description" 'Title of the task'
-    \\    gila add --priority-value=200 'Title of the task'
+    \\    gila create --priority=low --priority-value=50 --description="This is a description" 'Title of the task'
+    \\    gila create --priority-value=200 'Title of the task'
     \\
 ;
 

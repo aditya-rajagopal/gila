@@ -8,7 +8,7 @@ const stdx = @import("stdx");
 const flags = stdx.flags;
 const zon = @import("zon");
 
-const Add = @import("commands/add.zig");
+const Create = @import("commands/create.zig");
 const Init = @import("commands/init.zig");
 
 const log = std.log.scoped(.gila);
@@ -60,7 +60,7 @@ pub fn logFn(
 
 const CLIArgs = union(enum) {
     init: Init,
-    add: Add,
+    create: Create,
     version,
 
     pub const help =
@@ -72,12 +72,12 @@ const CLIArgs = union(enum) {
         \\
         \\    gila init [-h | --help] [--bare] [<directory>]
         \\
-        \\    gila add [-h | --help] [--priority=<priority>] [--priority-value=<value>] [--description=<description>] <title>
+        \\    gila create [-h | --help] [--priority=<priority>] [--priority-value=<value>] [--description=<description>] <title>
         \\
         \\Commands:
-        \\    version  Prints the version of the GILA CLI.
-        \\    init  Initializes a new GILA project in the current directory or the specified directory.
-        \\    add   Adds a new task to the current project.
+        \\    version   Prints the version of the GILA CLI.
+        \\    init      Initializes a new GILA project in the current directory or the specified directory.
+        \\    create    Create a new task to the current project.
         \\
         \\Options:
         \\    -h, --help
@@ -86,7 +86,7 @@ const CLIArgs = union(enum) {
         \\Examples:
         \\    gila init
         \\    gila init some/directory/path
-        \\    gila add --priority=low --priority-value=50 --description="This is a description" 'Title of the task'
+        \\    gila create --priority=low --priority-value=50 --description="This is a description" 'Title of the task'
         \\
     ;
 };
@@ -101,7 +101,7 @@ pub fn main() !void {
 
     switch (cli) {
         .init => |init| init.execute(&arena),
-        .add => |add| add.execute(&arena),
+        .create => |create| create.execute(&arena),
         .version => {
             var stdout = std.fs.File.stdout().writer(&.{});
             stdout.interface.print("v{s}\n", .{zon.version}) catch |err| {

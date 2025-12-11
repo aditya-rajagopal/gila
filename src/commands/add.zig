@@ -94,6 +94,10 @@ pub fn execute(self: @This(), arena: *stdx.Arena) void {
         log.err("Failed to write to description.md: {s}", .{@errorName(err)});
         return;
     };
+    interface.print(gila.seperator ++ "\n", .{}) catch |err| {
+        log.err("Failed to write to description.md: {s}", .{@errorName(err)});
+        return;
+    };
 
     if (self.description) |description| {
         interface.print(gila.description_body_template, .{description}) catch |err| {
@@ -123,7 +127,7 @@ pub fn execute(self: @This(), arena: *stdx.Arena) void {
     const editor_name = std.process.getEnvVarOwned(allocator, "EDITOR") catch "vim";
 
     const file_name = std.fmt.allocPrint(allocator, "{s}/.gila/todo/{s}/description.md", .{ gila_dir_name, task_name }) catch unreachable;
-    var editor = std.process.Child.init(&.{ editor_name, file_name }, std.heap.page_allocator);
+    var editor = std.process.Child.init(&.{ editor_name, "+", file_name }, std.heap.page_allocator);
 
     editor.spawn() catch |err| {
         log.err("Failed to spawn editor {s}: {s}", .{ editor_name, @errorName(err) });
@@ -136,7 +140,6 @@ pub fn execute(self: @This(), arena: *stdx.Arena) void {
         return;
     };
 
-    // Print the file contents to stdout
     var stdout = std.fs.File.stdout().writer(&.{});
     stdout.interface.print("New task created at: {s}/.gila/todo/{s}/description.md\n", .{ gila_dir_name, task_name }) catch unreachable;
     return;

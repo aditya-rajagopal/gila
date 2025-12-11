@@ -53,22 +53,29 @@ pub const Priority = enum {
 pub const description_header_template =
     \\# {s}
     \\
-    \\- status: {s}
-    \\- priority: {s}, {d}
-    \\- owner: {s}
-    \\- created: {f}
+    \\
+++ seperator ++
+    \\
+    \\status: {s}
+    \\priority: {s}, {d}
+    \\owner: {s}
+    \\created: {f}
+    \\
 ;
 
 pub const description_compeleted_template =
-    \\- completed: {s}
+    \\completed: {s}
 ;
 
 pub const description_tags_template =
-    \\- tags: 
+    \\tags: 
+;
+
+pub const seperator =
+    \\------
 ;
 
 pub const description_body_template =
-    \\
     \\
     \\# Description
     \\

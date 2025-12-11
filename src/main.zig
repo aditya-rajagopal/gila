@@ -91,11 +91,14 @@ const CLIArgs = union(enum) {
     ;
 };
 
-pub fn main() !void {
+pub fn main() void {
     var stack_space: [1024 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&stack_space);
 
-    var args = try std.process.argsWithAllocator(arena.allocator());
+    var args = std.process.argsWithAllocator(arena.allocator()) catch |err| {
+        log.err("Failed to get args: {s}", .{@errorName(err)});
+        return;
+    };
 
     const cli = flags.parseArgs(&args, CLIArgs);
 
@@ -107,12 +110,6 @@ pub fn main() !void {
             stdout.interface.print("v{s}\n", .{zon.version}) catch |err| {
                 log.err("Failed to write to stdout: {s}", .{@errorName(err)});
             };
-            // @IMPORTANT I never forget to flush
-            stdout.interface.flush() catch |err| {
-                log.err("Failed to flush stdout: {s}", .{@errorName(err)});
-                return;
-            };
-            return;
         },
     }
 }

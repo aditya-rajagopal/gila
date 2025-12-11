@@ -90,11 +90,11 @@ pub fn execute(self: @This(), arena: *stdx.Arena) void {
     };
     defer gila_dir.close();
 
-    gila_dir.makeDir("TODO") catch |err| {
-        log.err("Unexpected error while creating TODO folder: {s}", .{@errorName(err)});
+    gila_dir.makeDir("todo") catch |err| {
+        log.err("Unexpected error while creating todo folder: {s}", .{@errorName(err)});
         unreachable;
     };
-    std.log.info("Successfully created TODO folder", .{});
+    std.log.info("Successfully created todo folder", .{});
 
     return;
 }

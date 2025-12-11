@@ -53,7 +53,6 @@ though it is not required.
 
 ## File Tree
 
-
 All artifacts must be stored in a directory called `.gila`. Each folder with this name represents tasks for a single project.
 
 The children of this directory **may** contain a folder for each **Status** that the task can be in. It is recommended 
@@ -63,12 +62,16 @@ Each **Status** folder contains one folder for each **Task** that is in that sta
 
 `task_TASKID`
 
-See [TASKID](#taskid) for more information on the format.
+See [TASKID](#taskid) for more information on the format. 
 
 Each **Task** folder **must** contain the following files:
 
 * `description.md`: A markdown file containing the description of the **Task**. See [Task Description](#task-description) for more information.
 * `comments.md`: A markdown file containing the comments for the **Task**.
+
+NOTE: When there is a descrepancy between the contents of `description.md` and the [TASKID](#taskid) the contents of `description.md` must be used.
+And tools should warn users and move the contents of the **Task** folder to the correct location. e.g. if it is in the TODO folder but
+the status in `description.md` was changed to DONE externally the task should be moved to DONE the next time the tool is run.
 
 **All** files and folders other than the ones speficially mentioned above are considered supplemental to the project, status, or task 
 depending on where they are located. It is recommended to put all files and folders related to a specific **Task** in the directory with its unique identifier.
@@ -78,7 +81,7 @@ The entire `.gila` directory is intended to be committed to a remote repository.
 
 ```
 .gila
-├── TODO
+├── todo
 │   ├── task_20251205_120000_adiraj
 │   │   ├── description.md
 │   │   └── comments.md
@@ -86,7 +89,7 @@ The entire `.gila` directory is intended to be committed to a remote repository.
 │   └── task_20251205_120001_adiraj
 │       ├── description.md
 │       └── comments.md
-└── DONE
+└── done
     ├── task_20251205_120002_adiraj
     │   ├── description.md
     │   └── comments.md
@@ -128,15 +131,17 @@ Each **Task** Folder contains a file called `description.md`. The file **must** 
 ```
 # <Task Name>
 
-- status: <TODO|DONE|IN_PROGRESS|CANCELLED|WAITING>
-- priority: <LOW|MEDIUM|HIGH|URGENT>, <optional integer value>
-- owner: <Owner>
-- created: YYYY-MM-DD HH:MM:SS
-- completed: YYYY-MM-DD HH:MM:SS (only if status is DONE or CANCELLED)
-- waiting_on: [<TaskRef1>, <TaskRef2>, ...] (only if status is WAITING)
+------
+status: <TODO|DONE|IN_PROGRESS|CANCELLED|WAITING>
+priority: <LOW|MEDIUM|HIGH|URGENT>, <optional integer value>
+owner: <Owner>
+created: YYYY-MM-DD HH:MM:SS.fff
+completed: YYYY-MM-DD HH:MM:fff (only if status is DONE or CANCELLED)
+waiting_on: <TaskRef1>, <TaskRef2>, ... (only if status is WAITING)
 <optional fields>
-- tags: [<Tag1>, <Tag2>, ...]
+tags: <Tag1>, <Tag2>, ...
 </optional fields>
+------
 
 # Description
 ```
@@ -157,20 +162,17 @@ Each **Task** folder **must** contain a file called `comments.md`. The file **mu
 ```
 # Comments
 
-## YYYY-MM-DD HH:MM:SS <User>:
+======
+header: YYYY-MM-DD HH:MM:SS.fff <User>
 <Comment>
+------
 
-## YYYY-MM-DD HH:MM:SS <User>:
+======
+header: YYYY-MM-DD HH:MM:SS.fff <User>
 <Comment>
+------
 ...
 ```
 
-The `YYYY-MM-DD HH:MM:SS` is the date and time when the comment was made. The `<User>` is the name of the user who made the comment.
+The `YYYY-MM-DD HH:MM:SS.fff` is the date and time when the comment was made. The `<User>` is the name of the user who made the comment.
 
-#### Comment References
-
-Anywhere a comment is to be referenced within a task it should be `[[YYYY-MM-DD_HH-MM-SS_user]]`.
-
-**DRAFT**
-Comments when referenced from outside a task can be referenced by `[[YYYYMMDD_HHMMSS_user#YYYY-MM-DD_HH-MM-SS_user]]`.
-which is basically task_id#comment_id.

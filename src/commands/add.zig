@@ -8,6 +8,8 @@ const log = std.log.scoped(.gila);
 const gila = @import("gila");
 const stdx = @import("stdx");
 
+const common = @import("common.zig");
+
 priority: gila.Priority = .medium,
 priority_value: u8 = 50,
 description: ?[]const u8 = null,
@@ -55,66 +57,17 @@ pub fn execute(self: @This(), arena: *stdx.Arena) void {
     if (!self.verbose) {
         root.log_level = .warn;
     }
-    var current_dir: []const u8 = std.process.getCwdAlloc(allocator) catch |err| {
+
+    const pwd: []const u8 = std.process.getCwdAlloc(allocator) catch |err| {
         log.err("Failed to get current directory: {s}", .{@errorName(err)});
         return;
     };
-
-    outter_loop: for (0..128) |_| {
-        var dir = std.fs.openDirAbsolute(current_dir, .{ .iterate = true }) catch |err| {
-            log.err("Failed to open current directory: {s}", .{@errorName(err)});
-            return;
-        };
-        defer dir.close();
-
-        var dir_walker = dir.iterateAssumeFirstIteration();
-        while (dir_walker.next() catch |err| {
-            log.err("Failed to iterate directory {s}: {s}", .{ current_dir, @errorName(err) });
-            return;
-        }) |entry| {
-            if (entry.kind == .directory) {
-                if (std.mem.eql(u8, entry.name, gila.dir_name)) {
-                    log.info("Found .gila directory at {s}/{s}", .{ current_dir, gila.dir_name });
-                    break :outter_loop;
-                }
-            }
-        }
-        current_dir = std.fs.path.dirname(current_dir) orelse break;
-    }
-    var base_dir = std.fs.openDirAbsolute(current_dir, .{}) catch |err| {
-        log.err("Failed to open directory {s}: {s}", .{ current_dir, @errorName(err) });
-        return;
-    };
-    defer base_dir.close();
-    log.info("Opened directory {s}", .{current_dir});
-
-    var gila_dir = base_dir.openDir(gila.dir_name, .{}) catch |err| {
-        log.err("Failed to open .gila directory {s}/{s}: {s}", .{ current_dir, gila.dir_name, @errorName(err) });
-        return;
-    };
-    log.info("Opened .gila directory {s}/{s}", .{ current_dir, gila.dir_name });
-
-    defer gila_dir.close();
-
-    gila_dir.makeDir("TODO") catch |err| switch (err) {
-        error.PathAlreadyExists => {},
-        else => |e| {
-            log.err("Failed to create TODO folder: {s}", .{@errorName(e)});
-            return;
-        },
-    };
-    var todo_dir = gila_dir.openDir("TODO", .{}) catch |err| {
-        log.err("Failed to open TODO folder: {s}", .{@errorName(err)});
-        return;
-    };
-    defer todo_dir.close();
-    log.info("Successfully opened or created TODO folder", .{});
+    const gila_dir_name = common.searchForGilaDir(pwd) orelse return;
 
     const task_id: gila.TaskId = gila.TaskId.new(allocator) catch |err| {
         log.err("Failed to get user environment variable: {s}", .{@errorName(err)});
         return;
     };
-
     const task_name = std.fmt.allocPrint(allocator, "{f}", .{
         task_id,
     }) catch |err| {
@@ -122,29 +75,7 @@ pub fn execute(self: @This(), arena: *stdx.Arena) void {
         return;
     };
 
-    todo_dir.makeDir(task_name) catch |err| switch (err) {
-        error.PathAlreadyExists => {
-            @branchHint(.unlikely);
-            log.err("Task {s} already exists. If you want to create a new task you can wait for 1 second and try again.", .{task_name});
-            return;
-        },
-        else => |e| {
-            log.err("Failed to create task {s}: {s}", .{ task_name, @errorName(e) });
-            return;
-        },
-    };
-    log.info("Successfully created task directory {s}", .{task_name});
-
-    var task_dir = todo_dir.openDir(task_name, .{}) catch |err| {
-        log.err("Failed to open task {s}: {s}", .{ task_name, @errorName(err) });
-        return;
-    };
-    defer task_dir.close();
-
-    var description_file = task_dir.createFile("description.md", .{ .read = self.verbose }) catch |err| {
-        log.err("Failed to create description.md file: {s}", .{@errorName(err)});
-        return;
-    };
+    const description_file = self.createDescrptionFile(allocator, gila_dir_name, task_name) orelse return;
     defer description_file.close();
     log.info("Successfully created description.md file", .{});
 
@@ -188,35 +119,67 @@ pub fn execute(self: @This(), arena: *stdx.Arena) void {
     };
     log.info("Successfully written template to description.md", .{});
 
+    // @TODO make the default editor configurable
+    const editor_name = std.process.getEnvVarOwned(allocator, "EDITOR") catch "vim";
+
+    const file_name = std.fmt.allocPrint(allocator, "{s}/.gila/todo/{s}/description.md", .{ gila_dir_name, task_name }) catch unreachable;
+    var editor = std.process.Child.init(&.{ editor_name, file_name }, std.heap.page_allocator);
+
+    editor.spawn() catch |err| {
+        log.err("Failed to spawn editor {s}: {s}", .{ editor_name, @errorName(err) });
+        return;
+    };
+
+    log.info("Opened editor {s} at {f}", .{ editor_name, stdx.DateTimeUTC.now() });
+    _ = editor.wait() catch |err| {
+        log.err("Failed to open editor: {s}", .{@errorName(err)});
+        return;
+    };
+
     // Print the file contents to stdout
-    var stdout = std.fs.File.stdout().writer(&buffer);
-    if (self.verbose) {
-        var file_reader = description_file.reader(&.{});
-
-        description_file.seekTo(0) catch |err| {
-            log.err("Failed to seek to start of {s}/TODO/{s}/description.md: {s}", .{ current_dir, task_name, @errorName(err) });
-            return;
-        };
-        const stat = description_file.stat() catch |err| {
-            log.err("Failed to get stat for  {s}/TODO/{s}/description.md: {s}", .{ current_dir, task_name, @errorName(err) });
-            return;
-        };
-        assert(stat.size <= arena.remainingCapacity());
-
-        const file_contents = file_reader.interface.readAlloc(allocator, stat.size) catch |err| {
-            log.err("Failed to read {s}/TODO/{s}/description.md: {s}", .{ current_dir, task_name, @errorName(err) });
-            return;
-        };
-        stdout.interface.writeAll(file_contents) catch unreachable;
-
-        // @IMPORTANT I never forget to flush
-        stdout.interface.flush() catch |err| {
-            log.err("Failed to flush stdout: {s}", .{@errorName(err)});
-            return;
-        };
-    }
-    stdout.interface.print("New task created at: {s}/TODO/{s}/description.md\n", .{ current_dir, task_name }) catch unreachable;
-    // @IMPORTANT I never forget to flush
-    stdout.interface.flush() catch unreachable;
+    var stdout = std.fs.File.stdout().writer(&.{});
+    stdout.interface.print("New task created at: {s}/.gila/todo/{s}/description.md\n", .{ gila_dir_name, task_name }) catch unreachable;
     return;
+}
+
+fn createDescrptionFile(self: @This(), allocator: std.mem.Allocator, current_dir: []const u8, task_name: []const u8) ?std.fs.File {
+    const base_name = std.fs.path.join(allocator, &.{ current_dir, gila.dir_name }) catch |err| {
+        log.err("Unexpected error while joining {s}/{s}: {s}", .{ current_dir, gila.dir_name, @errorName(err) });
+        return null;
+    };
+
+    var gila_dir = std.fs.openDirAbsolute(base_name, .{}) catch |err| {
+        log.err("Failed to open .gila directory {s}: {s}", .{ base_name, @errorName(err) });
+        return null;
+    };
+
+    defer gila_dir.close();
+
+    const task_dir_name = std.fs.path.join(allocator, &.{ "todo", task_name }) catch |err| {
+        log.err("Unexpected error while joining todo/{s}: {s}", .{ task_name, @errorName(err) });
+        return null;
+    };
+
+    const result = gila_dir.makePathStatus(task_dir_name) catch |err| {
+        log.err("Failed to create task directory {s}: {s}", .{ task_name, @errorName(err) });
+        return null;
+    };
+
+    if (result == .existed) {
+        log.err("Task {s} already exists. If you want to create a new task you can wait for 1 second and try again.", .{task_name});
+        return null;
+    }
+    log.info("Successfully created task directory {s}", .{task_name});
+
+    var task_dir = gila_dir.openDir(task_dir_name, .{}) catch |err| {
+        log.err("Failed to open task {s}/{s}: {s}", .{ base_name, task_dir_name, @errorName(err) });
+        return null;
+    };
+    defer task_dir.close();
+
+    const description_file = task_dir.createFile("description.md", .{ .read = self.verbose }) catch |err| {
+        log.err("Failed to create description.md file: {s}", .{@errorName(err)});
+        return null;
+    };
+    return description_file;
 }

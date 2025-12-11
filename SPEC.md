@@ -66,12 +66,11 @@ See [TASKID](#taskid) for more information on the format.
 
 Each **Task** folder **must** contain the following files:
 
-* `description.md`: A markdown file containing the description of the **Task**. See [Task Description](#task-description) for more information.
-* `comments.md`: A markdown file containing the comments for the **Task**.
+* `(TASKID).md`: A markdown file containing the description of the **Task**. See [Task Description](#task-description) for more information.
 
-NOTE: When there is a descrepancy between the contents of `description.md` and the [TASKID](#taskid) the contents of `description.md` must be used.
+NOTE: When there is a descrepancy between the contents of `*.md` and the [TASKID](#taskid) and its location the contents of `*.md` must be used.
 And tools should warn users and move the contents of the **Task** folder to the correct location. e.g. if it is in the TODO folder but
-the status in `description.md` was changed to DONE externally the task should be moved to DONE the next time the tool is run.
+the status in `(TASKID).md` was changed to DONE externally the task should be moved to DONE the next time the tool is run.
 
 **All** files and folders other than the ones speficially mentioned above are considered supplemental to the project, status, or task 
 depending on where they are located. It is recommended to put all files and folders related to a specific **Task** in the directory with its unique identifier.
@@ -82,22 +81,18 @@ The entire `.gila` directory is intended to be committed to a remote repository.
 ```
 .gila
 ├── todo
-│   ├── task_20251205_120000_adiraj
-│   │   ├── description.md
-│   │   └── comments.md
+│   ├── 20251205_120000_adiraj
+│   │   ├── 20251205_120000_adiraj.md
 │   │   └── supplemental_file1
-│   └── task_20251205_120001_adiraj
-│       ├── description.md
-│       └── comments.md
+│   └── 20251205_120001_adiraj
+│       └── 20251205_120001_adiraj.md
 └── done
-    ├── task_20251205_120002_adiraj
-    │   ├── description.md
-    │   └── comments.md
-    │   └── supplemental_file1
+    ├── 20251205_120002_adiraj
+    │   ├── 20251205_120002_adiraj.md
+    │   ├── supplemental_file1
     │   └── supplemental_file2
-    └── task_20251205_120003_adiraj
-        ├── description.md
-        └── comments.md
+    └── 20251205_120003_adiraj
+        └── 20251205_120003_adiraj.md
 ```
 
 ### Task
@@ -121,30 +116,38 @@ Example:
 ### Referencing Tasks
 
 Anywhere a task is to be referenced it should be in one of the following formats:
-* `[[task_TASKID]]`: This is the preferred format for referencing a task in a markdown file.
+* `[[TASKID]]`: This is the preferred format for referencing a task in the **Description** file.
 * `GILA(TASKID)`: This is the preferred format for referencing a task in a comment within code.
 
 ### Task Description
 
-Each **Task** Folder contains a file called `description.md`. The file **must** have the following header:
+Each **Task** Folder contains a file called `(TASKID).md`. The file **must** have the following header:
 
 ```
+---
+status: <TODO|DONE|IN_PROGRESS|CANCELLED|WAITING>
+priority: <LOW|MEDIUM|HIGH|URGENT>
+priority_value: 0-255
+owner: <Owner>
+created: YYYY-MM-DDTHH:MM:SSZ
+completed: YYYY-MM-DDTHH:MM:SSZ (only if status is DONE or CANCELLED)
+waiting_on:
+- "[[TaskID]]"
+- "[[TaskID]]"
+- ... (only if status is WAITING)
+<optional fields>
+tags:
+- <Tag1>
+- <Tag2>
+- ...
+</optional fields>
+---
+
 # <Task Name>
 
-------
-status: <TODO|DONE|IN_PROGRESS|CANCELLED|WAITING>
-priority: <LOW|MEDIUM|HIGH|URGENT>, <optional integer value>
-owner: <Owner>
-created: YYYY-MM-DD HH:MM:SS.fff
-completed: YYYY-MM-DD HH:MM:fff (only if status is DONE or CANCELLED)
-waiting_on: <TaskRef1>, <TaskRef2>, ... (only if status is WAITING)
-<optional fields>
-tags: <Tag1>, <Tag2>, ...
-</optional fields>
-------
-
-# Description
 ```
+
+NOTE: All times are in UTC and are formatted as `YYYY-MM-DDTHH:MM:SSZ`.
 
 There are fields that **must** be present in the **Description** that are situationally:
 
@@ -153,26 +156,5 @@ There are fields that **must** be present in the **Description** that are situat
 
 There are optional fileds that need not be present at all to be a valid **Description**:
 
-* `tags`: A list of tags that are comma seperated that can be used to categorize tasks.
-
-### Comments
-
-Each **Task** folder **must** contain a file called `comments.md`. The file **must** have the following header:
-
-```
-# Comments
-
-======
-header: YYYY-MM-DD HH:MM:SS.fff <User>
-<Comment>
-------
-
-======
-header: YYYY-MM-DD HH:MM:SS.fff <User>
-<Comment>
-------
-...
-```
-
-The `YYYY-MM-DD HH:MM:SS.fff` is the date and time when the comment was made. The `<User>` is the name of the user who made the comment.
+* `tags`: A list of tags with one tag per line that must start with a `-`. The tags can be used to categorize tasks.
 

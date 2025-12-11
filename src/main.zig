@@ -11,8 +11,6 @@ const zon = @import("zon");
 const Todo = @import("commands/todo.zig");
 const Init = @import("commands/init.zig");
 
-const log = std.log.scoped(.gila);
-
 pub const std_options: std.Options = .{
     .logFn = logFn,
 };
@@ -96,7 +94,8 @@ pub fn main() void {
     var arena = stdx.Arena.initBuffer(&stack_space);
 
     var args = std.process.argsWithAllocator(arena.allocator()) catch |err| {
-        log.err("Failed to get args: {s}", .{@errorName(err)});
+        var stderr = std.fs.File.stderr().writer(&.{});
+        stderr.interface.print("Failed to get args: {s}\n", .{@errorName(err)}) catch unreachable;
         return;
     };
 
@@ -108,7 +107,8 @@ pub fn main() void {
         .version => {
             var stdout = std.fs.File.stdout().writer(&.{});
             stdout.interface.print("v{s}\n", .{zon.version}) catch |err| {
-                log.err("Failed to write to stdout: {s}", .{@errorName(err)});
+                var stderr = std.fs.File.stderr().writer(&.{});
+                stderr.interface.print("Failed to write to stdout: {s}", .{@errorName(err)}) catch unreachable;
             };
         },
     }

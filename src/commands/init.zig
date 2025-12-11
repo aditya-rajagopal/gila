@@ -4,7 +4,7 @@ const root = @import("root");
 const gila = @import("gila");
 const stdx = @import("stdx");
 
-const log = std.log.scoped(.gila);
+const log = std.log.scoped(.init);
 
 bare: bool = false,
 verbose: bool = false,

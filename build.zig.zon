@@ -6,8 +6,8 @@
     .minimum_zig_version = "0.16.0-dev.923+06d9e3bc0",
     .dependencies = .{
         .stdx = .{
-            .url = "git+https://github.com/aditya-rajagopal/stdx.git#bcece39707bbde040d3fe4b6a827c0d65fe9c99b",
-            .hash = "stdx-0.0.0-JEHEYS9VAQC0USKgUL90nDTtnY53z35KL9q3rbZtl4Tk",
+            .url = "git+https://github.com/aditya-rajagopal/stdx.git#6b488a0f5d7399d068375570e7d25cf125d1f9a0",
+            .hash = "stdx-0.0.0-JEHEYcZvAQDDdV1mvzr8zDCKkX7ex5P6uUPW0d7swPo2",
         },
     },
     .paths = .{""},

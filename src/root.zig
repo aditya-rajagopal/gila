@@ -5,8 +5,8 @@ const assert = std.debug.assert;
 
 pub const logo = @embedFile("ascii.txt");
 pub const dir_name = ".gila";
-pub const description_file_name = "description.md";
-pub const comments_file_name = "comments.md";
+
+const log = std.log.scoped(.gila);
 
 pub const Status = union(enum(u8)) {
     todo,
@@ -28,14 +28,30 @@ pub const TaskId = struct {
         return result;
     }
 
-    pub fn fromString(str: []const u8) TaskId {
+    pub fn fromString(str: []const u8) error{InvalidTaskId}!TaskId {
         var result: TaskId = undefined;
         // @NOTE string for taskId must start with YYYYMMDD_HHMMSS_ followed by username
-        assert(str.len >= 15);
-        result.date_time = .fromString(str[0..15], .YYYYMMDD_HHMMSS);
-        assert(str[15] == '_');
+        if (str.len < 15) {
+            log.err("Invalid task_id `{s}` a task is of the form YYYYMMDD_HHMMSS_username", .{str});
+            return error.InvalidTaskId;
+        }
+        result.date_time = .fromString(str[0..15], .YYYYMMDD_HHMMSS) catch |err| {
+            log.err("Failed to parse date_time `{s}` from task_id `{s}`: {s}", .{ str[0..15], str, @errorName(err) });
+            return error.InvalidTaskId;
+        };
+        if (str[15] != '_') {
+            log.err("Invalid task_id `{s}` a task is of the form YYYYMMDD_HHMMSS_username", .{str});
+            return error.InvalidTaskId;
+        }
         result.user_name = str[16..];
         return result;
+    }
+
+    pub fn isValidFormat(str: []const u8) bool {
+        if (str.len < 15) return false;
+        if (str[15] != '_') return false;
+        _ = stdx.DateTimeUTC.fromString(str[0..15], .YYYYMMDD_HHMMSS) catch return false;
+        return true;
     }
 
     pub fn format(self: TaskId, writer: *std.Io.Writer) !void {
@@ -51,20 +67,23 @@ pub const Priority = enum {
 };
 
 pub const description_header_template =
-    \\# {s}
+    seperator ++
     \\
-    \\
-++ seperator ++
-    \\
+    \\title: {s}
     \\status: {s}
-    \\priority: {s}, {d}
+    \\priority: {s}
+    \\priority_value: {d}
     \\owner: {s}
     \\created: {f}
     \\
-;
+    ;
 
 pub const description_compeleted_template =
     \\completed: {s}
+;
+
+pub const description_waiting_on_template =
+    \\waiting_on:
 ;
 
 pub const description_tags_template =
@@ -72,13 +91,10 @@ pub const description_tags_template =
 ;
 
 pub const seperator =
-    \\------
+    \\---
 ;
 
 pub const description_body_template =
-    \\
-    \\# Description
-    \\
     \\{s}
     \\
 ;

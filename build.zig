@@ -30,7 +30,6 @@ pub fn build(b: *std.Build) void {
         .name = "gila",
         .root_module = exe_mod,
     });
-    exe.stack_size = 2 * 1024 * 1024; // Asking for 2MB of stack
 
     b.installArtifact(exe);
 

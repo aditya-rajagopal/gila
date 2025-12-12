@@ -95,7 +95,7 @@ const CLIArgs = union(enum) {
 };
 
 pub fn main() void {
-    var stack_space: [1024 * 1024]u8 = undefined;
+    var stack_space: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&stack_space);
 
     var args = std.process.argsWithAllocator(arena.allocator()) catch |err| {

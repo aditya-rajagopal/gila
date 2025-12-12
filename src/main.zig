@@ -10,12 +10,16 @@ const zon = @import("zon");
 
 const Todo = @import("commands/todo.zig");
 const Init = @import("commands/init.zig");
+const Done = @import("commands/done.zig");
 
 pub const std_options: std.Options = .{
     .logFn = logFn,
 };
 
-pub var log_level: std.log.Level = std.log.Level.info;
+pub var log_level: std.log.Level = switch (builtin.mode) {
+    .Debug => std.log.Level.debug,
+    else => std.log.Level.info,
+};
 
 pub fn logFn(
     comptime level: std.log.Level,
@@ -59,6 +63,7 @@ pub fn logFn(
 const CLIArgs = union(enum) {
     init: Init,
     todo: Todo,
+    done: Done,
     version,
 
     pub const help =
@@ -104,6 +109,7 @@ pub fn main() void {
     switch (cli) {
         .init => |init| init.execute(&arena),
         .todo => |todo| todo.execute(&arena),
+        .done => |done| done.execute(&arena),
         .version => {
             var stdout = std.fs.File.stdout().writer(&.{});
             stdout.interface.print("v{s}\n", .{zon.version}) catch |err| {

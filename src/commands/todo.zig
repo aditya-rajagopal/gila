@@ -59,11 +59,15 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
     if (!self.verbose) {
         root.log_level = .warn;
     }
+    if (!validateTitle(self.positional.title)) {
+        return;
+    }
 
     const pwd: []const u8 = std.process.getCwdAlloc(allocator) catch |err| {
         log.err("Failed to get current directory: {s}", .{@errorName(err)});
         return;
     };
+    log.debug("Current directory: {s}", .{pwd});
     const gila_dir_name = common.searchForGilaDir(pwd) orelse return;
 
     const task_id: gila.TaskId = gila.TaskId.new(allocator) catch |err| {
@@ -76,18 +80,14 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
         log.err("Failed to allocate task name: {s}", .{@errorName(err)});
         return;
     };
+    log.debug("Generated task_id: {s}", .{task_name});
 
-    const description_file = self.createDescrptionFile(allocator, gila_dir_name, task_name) orelse return;
+    const description_file = self.createTodoDescrptionFile(allocator, gila_dir_name, task_name) orelse return;
     defer description_file.close();
-    log.info("Successfully created description file", .{});
 
     var buffer: [4096]u8 = undefined;
     var writer = description_file.writer(&buffer);
     const interface: *std.Io.Writer = &writer.interface;
-
-    if (!validateTitle(self.positional.title)) {
-        return;
-    }
 
     interface.print(gila.description_header_template, .{
         self.positional.title,
@@ -133,36 +133,42 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
     // @TODO make the default editor configurable
     const editor_name = std.process.getEnvVarOwned(allocator, "EDITOR") catch "vim";
 
-    const file_name = std.fmt.allocPrint(allocator, "{s}/.gila/todo/{s}/{s}.md", .{ gila_dir_name, task_name, task_name }) catch unreachable;
+    var md_file_writer = std.Io.Writer.fixed(&buffer);
+    md_file_writer.print("{s}.md", .{task_name}) catch unreachable;
+    const task_file_name = md_file_writer.buffered();
+    const file_name = std.fs.path.join(allocator, &.{ gila_dir_name, ".gila", "todo", task_name, task_file_name }) catch |err| {
+        log.err("Unexpected error while joining path: {s}", .{@errorName(err)});
+        return;
+    };
     var editor = std.process.Child.init(&.{ editor_name, "+", file_name }, std.heap.page_allocator);
-
     editor.spawn() catch |err| {
         log.err("Failed to spawn editor {s}: {s}", .{ editor_name, @errorName(err) });
         return;
     };
-
-    log.info("Opened editor {s} at {f}", .{ editor_name, stdx.DateTimeUTC.now() });
-    _ = editor.wait() catch |err| {
+    log.debug("Opened editor {s} at {f}", .{ editor_name, stdx.DateTimeUTC.now() });
+    const exit_code = editor.wait() catch |err| {
         log.err("Failed to open editor: {s}", .{@errorName(err)});
         return;
     };
+    log.debug("Editor exited with code {any} at {f}", .{ exit_code, stdx.DateTimeUTC.now() });
 
     var stdout = std.fs.File.stdout().writer(&.{});
     stdout.interface.print("New task created at: {s}/.gila/todo/{s}/{s}.md\n", .{ gila_dir_name, task_name, task_name }) catch unreachable;
     return;
 }
 
-fn createDescrptionFile(self: Todo, allocator: std.mem.Allocator, current_dir: []const u8, task_name: []const u8) ?std.fs.File {
+// @TODO this is probably a common functionality
+fn createTodoDescrptionFile(self: Todo, allocator: std.mem.Allocator, current_dir: []const u8, task_name: []const u8) ?std.fs.File {
     const base_name = std.fs.path.join(allocator, &.{ current_dir, gila.dir_name }) catch |err| {
         log.err("Unexpected error while joining {s}/{s}: {s}", .{ current_dir, gila.dir_name, @errorName(err) });
         return null;
     };
-
     var gila_dir = std.fs.openDirAbsolute(base_name, .{}) catch |err| {
         log.err("Failed to open .gila directory {s}: {s}", .{ base_name, @errorName(err) });
         return null;
     };
     defer gila_dir.close();
+    log.info("Opened gila directory {s}", .{base_name});
 
     const task_dir_name = std.fs.path.join(allocator, &.{ "todo", task_name }) catch |err| {
         log.err("Unexpected error while joining todo/{s}: {s}", .{ task_name, @errorName(err) });
@@ -177,14 +183,14 @@ fn createDescrptionFile(self: Todo, allocator: std.mem.Allocator, current_dir: [
         log.err("Task {s} already exists. If you want to create a new task you can wait for 1 second and try again.", .{task_name});
         return null;
     }
-
-    log.info("Successfully created task directory {s}", .{task_name});
+    log.info("Successfully created task directory todo/{s}", .{task_name});
 
     var task_dir = gila_dir.openDir(task_dir_name, .{}) catch |err| {
         log.err("Failed to open task {s}/{s}: {s}", .{ base_name, task_dir_name, @errorName(err) });
         return null;
     };
     defer task_dir.close();
+    log.debug("Opened task directory {s}", .{task_dir_name});
 
     var buffer: [1024]u8 = undefined;
     const file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{task_name}) catch |err| {
@@ -196,6 +202,7 @@ fn createDescrptionFile(self: Todo, allocator: std.mem.Allocator, current_dir: [
         log.err("Failed to create {s}.md file: {s}", .{ task_name, @errorName(err) });
         return null;
     };
+    log.info("Successfully created description file {s}", .{file_name});
     return description_file;
 }
 

@@ -1,0 +1,19 @@
+views:
+  - type: table
+    name: Table
+    order:
+      - file.name
+      - title
+      - status
+      - priority
+      - priority_value
+      - created
+    sort:
+      - property: title
+        direction: DESC
+      - property: priority_value
+        direction: ASC
+    columnSize:
+      note.title: 477
+      note.priority: 110
+      note.priority_value: 142

@@ -36,53 +36,53 @@ pub fn searchForGilaDir(pwd: []const u8) ?[]const u8 {
     return current_dir;
 }
 
-pub const InsertOnceGapBuffer = struct {
-    buffer: [3][]u8,
-    used: [3]u32,
-    cursor: u32,
-
-    pub fn init(data: []u8) InsertOnceGapBuffer {
-        return .{
-            .buffer = [_][]u8{ data, &.{}, &.{} },
-            .used = [_]usize{ data.len, 0, 0 },
-            .cursor = 0,
-        };
-    }
-
-    pub fn setCursor(self: *InsertOnceGapBuffer, cursor: usize) void {
-        const total_length = @reduce(.Add, self.used);
-        assert(cursor <= total_length);
-        self.cursor = cursor;
-    }
-
-    pub fn insert(self: *InsertOnceGapBuffer, data: []u8) void {
-        _ = self; // autofix
-        _ = data; // autofix
-    }
-
-    pub fn deleteForward(self: *InsertOnceGapBuffer, length: usize) void {
-        _ = self; // autofix
-        _ = length; // autofix
-    }
-};
-
 pub const Task = struct {
-    title: []u8,
-    description: []u8,
-    status: gila.Status,
-    priority: gila.Priority,
-    owner: []u8,
-    created: stdx.DateTimeUTC,
-    completed: ?stdx.DateTimeUTC,
-    tags: ?[][]u8,
+    pub const FindResult = struct {
+        file: ?std.fs.File,
+        status: gila.Status,
+    };
+    const FindError = error{
+        FailedToOpenGilaDirectory,
+        TaskNotFound,
+    } || std.fs.File.OpenError;
+    pub fn find(gpa: std.mem.Allocator, task_name: []const u8, gila_dir: std.fs.Dir) FindError!FindResult {
+        var buffer: [128]u8 = undefined;
+        var writer = std.Io.Writer.fixed(&buffer);
+        writer.print("{s}.md", .{task_name}) catch unreachable;
+        const task_file_name = writer.buffered();
 
-    pub fn init(gpa: std.mem.Allocator, id: gila.TaskId, gila_dir_absolute_path: []const u8) !Task {
-        _ = gpa; // autofix
-        _ = id; // autofix
-        var gila_dir = std.fs.openDirAbsolute(gila_dir_absolute_path, .{ .iterate = true }) catch |err| {
-            log.err("Failed to open gila directory: {s}", .{@errorName(err)});
+        const fixed_buffer: []u8 = gpa.alloc(u8, std.fs.max_path_bytes) catch |err| {
+            log.err("Failed to allocate path buffer: {s}", .{@errorName(err)});
             return error.FailedToOpenGilaDirectory;
         };
-        defer gila_dir.close();
+        defer gpa.free(fixed_buffer);
+        var path_arena = std.heap.FixedBufferAllocator.init(fixed_buffer);
+
+        var result: FindResult = .{ .file = null, .status = .todo };
+        inline for (std.meta.fields(gila.Status)) |field| {
+            path_arena.reset();
+            if (result.file == null) {
+                const name = std.fs.path.join(path_arena.allocator(), &.{ field.name, task_name, task_file_name }) catch |err| {
+                    log.err("Unexpected error when constructing path to task: {s}", .{@errorName(err)});
+                    return error.FailedToOpenGilaDirectory;
+                };
+                result.file = gila_dir.openFile(name, .{ .mode = .read_only }) catch |err| switch (err) {
+                    error.FileNotFound => blk: {
+                        log.debug("Task {s} does not exist in {s} directory", .{ task_name, name });
+                        break :blk null;
+                    },
+                    else => |e| {
+                        log.err("Failed to open task {s}: {s}", .{ task_name, @errorName(e) });
+                        return e;
+                    },
+                };
+                result.status = comptime std.meta.stringToEnum(gila.Status, field.name).?;
+                if (result.file) |_| {
+                    log.debug("Found task {s} at {s}", .{ task_name, name });
+                }
+            }
+        }
+
+        return result;
     }
 };

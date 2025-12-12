@@ -8,12 +8,20 @@ pub const dir_name = ".gila";
 
 const log = std.log.scoped(.gila);
 
-pub const Status = union(enum(u8)) {
+pub const Status = enum(u8) {
     todo,
     in_progress,
     done,
     cancelled,
-    waiting: ?[]const TaskId,
+    waiting,
+
+    pub const folder_names: []const []const u8 = blk: {
+        var names: []const []const u8 = &.{};
+        for (std.meta.fields(Status)) |field| {
+            names = names ++ &[_][]const u8{field.name};
+        }
+        break :blk names;
+    };
 };
 
 pub const TaskId = struct {
@@ -35,7 +43,7 @@ pub const TaskId = struct {
             log.err("Invalid task_id `{s}` a task is of the form YYYYMMDD_HHMMSS_username", .{str});
             return error.InvalidTaskId;
         }
-        result.date_time = .fromString(str[0..15], .YYYYMMDD_HHMMSS) catch |err| {
+        result.date_time = stdx.DateTimeUTC.fromString(str[0..15], .YYYYMMDD_HHMMSS) catch |err| {
             log.err("Failed to parse date_time `{s}` from task_id `{s}`: {s}", .{ str[0..15], str, @errorName(err) });
             return error.InvalidTaskId;
         };

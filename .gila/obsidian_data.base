@@ -1,6 +1,11 @@
+formulas:
+  "": ""
 views:
   - type: table
     name: Table
+    filters:
+      and:
+        - file.hasProperty("title")
     order:
       - file.name
       - title
@@ -8,7 +13,13 @@ views:
       - priority
       - priority_value
       - created
+      - completed
+      - tags
     sort:
+      - property: created
+        direction: DESC
+      - property: formula.
+        direction: ASC
       - property: title
         direction: DESC
       - property: priority_value
@@ -17,3 +28,4 @@ views:
       note.title: 477
       note.priority: 110
       note.priority_value: 142
+      note.created: 178

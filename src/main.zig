@@ -104,7 +104,7 @@ pub fn main() void {
         return;
     };
 
-    const cli = flags.parseArgs(&args, CLIArgs);
+    const cli = flags.parseArgs(arena.allocator(), &args, CLIArgs);
 
     switch (cli) {
         .init => |init| init.execute(&arena),

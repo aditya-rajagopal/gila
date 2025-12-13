@@ -96,6 +96,7 @@ pub const description_waiting_on_template =
 
 pub const description_tags_template =
     \\tags: 
+    \\
 ;
 
 pub const seperator =

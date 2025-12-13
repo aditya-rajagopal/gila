@@ -5,6 +5,7 @@ const assert = std.debug.assert;
 
 pub const logo = @embedFile("ascii.txt");
 pub const dir_name = ".gila";
+pub const Task = @import("task.zig");
 
 const log = std.log.scoped(.gila);
 
@@ -39,7 +40,7 @@ pub const TaskId = struct {
     pub fn fromString(str: []const u8) error{InvalidTaskId}!TaskId {
         var result: TaskId = undefined;
         // @NOTE string for taskId must start with YYYYMMDD_HHMMSS_ followed by username
-        if (str.len < 15) {
+        if (str.len < 17) {
             log.err("Invalid task_id `{s}` a task is of the form YYYYMMDD_HHMMSS_username", .{str});
             return error.InvalidTaskId;
         }
@@ -56,7 +57,7 @@ pub const TaskId = struct {
     }
 
     pub fn isValidFormat(str: []const u8) bool {
-        if (str.len < 15) return false;
+        if (str.len < 17) return false;
         if (str[15] != '_') return false;
         _ = stdx.DateTimeUTC.fromString(str[0..15], .YYYYMMDD_HHMMSS) catch return false;
         return true;

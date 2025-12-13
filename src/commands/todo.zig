@@ -15,7 +15,7 @@ const Todo = @This();
 priority: gila.Priority = .medium,
 priority_value: u8 = 50,
 description: ?[]const u8 = null,
-tags: ?Tags = null,
+tags: ?common.Tags = null,
 verbose: bool = false,
 edit: bool = false,
 positional: struct {
@@ -59,42 +59,6 @@ pub const help =
     \\    gila todo --priority-value=200 'Title of the task'
     \\
 ;
-
-const Tags = struct {
-    tags: []const []const u8,
-
-    pub fn parseFlagValue(gpa: std.mem.Allocator, flag_value: []const u8, error_out: *?[]const u8) error{Invalid}!@This() {
-        if (flag_value.len == 0) {
-            error_out.* = "Empty tag list";
-            return error.Invalid;
-        }
-        const illegal_characters = "\r\n\t";
-        const illegal_char = std.mem.findAny(u8, flag_value, illegal_characters);
-        if (illegal_char) |_| {
-            error_out.* = "Tag list cannot contain any of '" ++ illegal_characters ++ "'";
-            return error.Invalid;
-        }
-        const tag_count: usize = std.mem.countScalar(u8, flag_value, ',');
-        var tags = std.mem.splitScalar(u8, flag_value, ',');
-        const tag_list = gpa.alloc([]const u8, tag_count + 1) catch {
-            error_out.* = "Failed to allocate tag list";
-            return error.Invalid;
-        };
-        errdefer gpa.free(tag_list);
-
-        for (0..tag_count + 1) |index| {
-            const tag = tags.next().?;
-            if (tag.len == 0) {
-                error_out.* = "Empty tag in list";
-                return error.Invalid;
-            }
-            tag_list[index] = tag;
-        }
-        return .{
-            .tags = tag_list,
-        };
-    }
-};
 
 pub fn execute(self: Todo, arena: *stdx.Arena) void {
     const allocator = arena.allocator();

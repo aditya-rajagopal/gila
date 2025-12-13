@@ -3,7 +3,6 @@ const assert = std.debug.assert;
 const builtin = @import("builtin");
 
 const gila = @import("gila");
-const DateTimeUTC = gila.DateTimeUTC;
 const stdx = @import("stdx");
 const flags = stdx.flags;
 const zon = @import("zon");
@@ -11,6 +10,7 @@ const zon = @import("zon");
 const Todo = @import("commands/todo.zig");
 const Init = @import("commands/init.zig");
 const Done = @import("commands/done.zig");
+const common = @import("commands/common.zig");
 
 pub const std_options: std.Options = .{
     .logFn = logFn,
@@ -75,21 +75,27 @@ const CLIArgs = union(enum) {
         \\
         \\    gila init [-h | --help] [--bare] [<directory>]
         \\
-        \\    gila todo [-h | --help] [--priority=<priority>] [--priority-value=<value>] [--description=<description>] <title>
+        \\    gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>] 
+        \\              [--description=<description>] [--tags="<tag1>,<tag2>,..."] [--verbose] 
+        \\              [--edit] <title>
+        \\
+        \\    gila done [-h | --help] [--verbose] [--edit] <task_id>
         \\
         \\Commands:
         \\    version   Prints the version of the GILA CLI.
         \\    init      Initializes a new GILA project in the current directory or the specified directory.
         \\    todo      Create a new task to the current project.
+        \\    done      Moves a task to the done directory along with all artifacts in the task folder and marks status as done.
+        \\    tag       Add tags to a task.
         \\
         \\Options:
         \\    -h, --help
         \\        Prints this help message.
         \\
-        \\Examples:
+        \\Examples Lifecycle:
         \\    gila init
-        \\    gila init some/directory/path
         \\    gila todo --priority=low --priority-value=50 --description="This is a description" 'Title of the task'
+        \\    gila done 20251213_084840_adiraj
         \\
     ;
 };
@@ -118,4 +124,8 @@ pub fn main() void {
             };
         },
     }
+}
+
+test "All" {
+    std.testing.refAllDecls(@This());
 }

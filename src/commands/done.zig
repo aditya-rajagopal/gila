@@ -13,6 +13,7 @@ const common = @import("common.zig");
 const Done = @This();
 
 verbose: bool = false,
+edit: bool = false,
 positional: struct {
     task: []const u8,
 },
@@ -20,7 +21,7 @@ positional: struct {
 pub const help =
     \\Usage:
     \\
-    \\    gila done [-h | --help] <task_id>
+    \\    gila done [-h | --help] [--verbose] [--edit] <task_id>
     \\
     \\Marks a task as done copies it to the done directory and then deletes it from the todo directory.
     \\TODO: Move all the artifacts to the done directory.
@@ -29,8 +30,15 @@ pub const help =
     \\    -h, --help
     \\        Prints this help message.
     \\
+    \\    --verbose
+    \\        Run verbosely.
+    \\
+    \\    --edit
+    \\        Open the description file in the editor after moving files to the done directory.
+    \\
     \\Examples:
     \\    gila done 20225125_120000_username
+    \\    gila done --verbose --edit 20251213_055630_adiraj
     \\
 ;
 
@@ -53,180 +61,194 @@ pub fn execute(self: Done, arena: *stdx.Arena) void {
     defer gila_dir.close();
     log.info("Opened gila directory {s}", .{gila_path});
 
-    const task_id = gila.TaskId.fromString(self.positional.task) catch |err| {
-        log.err("Failed to parse task_id: {s}", .{@errorName(err)});
-        return;
-    };
-    _ = task_id;
-
     const result = common.Task.find(allocator, self.positional.task, gila_dir) catch return;
 
     var file = result.file orelse {
         log.err("Task {s} does not exist in gila directory {s}", .{ self.positional.task, gila_path });
         return;
     };
-    defer file.close();
 
     if (result.status == .done) {
         log.err("Task {s} found in the done directory.", .{self.positional.task});
         log.debug("TODO: Check if the task status in the file is actually done. Since that is the source of truth", .{});
         return;
     }
-    if (result.status == .waiting) {
-        log.debug("TODO: Check if all the tasks that this task are waiting on are done.", .{});
-    }
     if (result.status == .cancelled) {
         log.debug("TODO: What to do when a task is cancelled?", .{});
     }
-
-    const size = file.getEndPos() catch |err| {
-        log.err("Failed to get file size: {s}", .{@errorName(err)});
-        return;
-    };
-    log.debug("File size: {any}", .{size});
-    const buffer = arena.pushArray(u8, size);
-    file.seekTo(0) catch |err| {
-        log.err("Failed to seek to start of file: {s}", .{@errorName(err)});
-        return;
-    };
-    const read_size = file.preadAll(buffer, 0) catch |err| {
-        log.err("Failed to read file: {s}", .{@errorName(err)});
-        return;
-    };
-    assert(read_size == size);
-    log.debug("Read file contents: \n{s}", .{buffer});
-
-    const needle = "status: ";
-    const position = std.mem.find(u8, buffer, needle) orelse {
-        log.err("Malformed task description: could not find the status property in the task file {s}", .{self.positional.task});
-        return;
-    };
-    const prefix = buffer[0 .. position + needle.len];
-    log.debug("Prefix: \n{s}", .{prefix});
-    const suffix_start = std.mem.findScalar(u8, buffer[position + needle.len ..], '\n') orelse {
-        log.err("Malformed task description: could not find the end of the status property in the task file {s}", .{self.positional.task});
-        return;
-    };
-    if (suffix_start == 0) {
-        log.err("Malformed task description: status property is empty in the task file {s}", .{self.positional.task});
-        return;
-    }
-    var status = buffer[position + needle.len ..][0..suffix_start];
-    log.debug("Status: '{s}'", .{status});
-    const suffix = buffer[position + needle.len + status.len ..];
-
-    const done_text = "done";
-    if (status.len >= done_text.len) {
-        @memcpy(status[0..done_text.len], done_text);
-        status = status[0..done_text.len];
-    } else {
-        status = arena.pushArray(u8, done_text.len);
-        @memcpy(status, done_text);
+    if (result.status == .waiting) {
+        log.debug("TODO: Check if all the tasks that this task are waiting on are done.", .{});
     }
 
-    const done_file = createDoneDescrptionFile(allocator, self.positional.task, &gila_dir) orelse return;
-    defer done_file.close();
+    const buffer = read_all: {
+        const size = file.getEndPos() catch |err| {
+            log.err("Failed to get file size: {s}", .{@errorName(err)});
+            return;
+        };
+        log.debug("File size: {any}", .{size});
 
-    var write_buffer: [4096]u8 align(16) = undefined;
-    var file_writer = done_file.writer(&write_buffer);
-    const writer = &file_writer.interface;
-    writer.writeAll(prefix) catch |err| {
-        log.err("Failed to write to {s}.md: {s}", .{ self.positional.task, @errorName(err) });
-        return;
-    };
-    writer.writeAll(status) catch |err| {
-        log.err("Failed to write to {s}.md: {s}", .{ self.positional.task, @errorName(err) });
-        return;
-    };
-    writer.writeAll(suffix) catch |err| {
-        log.err("Failed to write to {s}.md: {s}", .{ self.positional.task, @errorName(err) });
-        return;
-    };
-    // @IMPORTANT I never forget to flush
-    writer.flush() catch |err| {
-        log.err("Failed to flush {s}.md: {s}", .{ self.positional.task, @errorName(err) });
-        return;
-    };
-    done_file.sync() catch |err| {
-        log.err("Failed to sync {s}.md: {s}", .{ self.positional.task, @errorName(err) });
-        return;
-    };
+        const buffer = arena.pushArray(u8, size);
 
-    var md_file_writer = std.Io.Writer.fixed(buffer);
+        file.seekTo(0) catch |err| {
+            log.err("Failed to seek to start of file: {s}", .{@errorName(err)});
+            return;
+        };
+        const read_size = file.preadAll(buffer, 0) catch |err| {
+            log.err("Failed to read file: {s}", .{@errorName(err)});
+            return;
+        };
+        assert(read_size == size);
+        break :read_all buffer;
+    };
+    log.info("Read description file contents: {d} bytes", .{buffer.len});
+    file.close();
+
+    const split_result = splitTaskDescription(buffer, gila_path, self.positional.task) orelse return;
+
+    var completed_buffer: [1024]u8 = undefined;
+    const parts = compute_parts: {
+        const prefix = buffer[0..split_result.prefix_end];
+        const before_completed = buffer[split_result.prefix_end + split_result.status_end ..][0..split_result.completed_location];
+        const suffix = buffer[split_result.prefix_end + split_result.status_end + split_result.completed_location ..];
+
+        var status = buffer[split_result.prefix_end..][0..split_result.status_end];
+        const done_text = "done";
+        if (status.len >= done_text.len) {
+            @memcpy(status[0..done_text.len], done_text);
+            status = status[0..done_text.len];
+        } else {
+            status = arena.pushArray(u8, done_text.len);
+            @memcpy(status, done_text);
+        }
+
+        var completed_writer = std.Io.Writer.fixed(&completed_buffer);
+        completed_writer.writeAll("completed: ") catch |err| {
+            log.err("Unexpected error while building completed property: {s}", .{@errorName(err)});
+            return;
+        };
+        completed_writer.print("{f}\n", .{stdx.DateTimeUTC.now().as(.@"YYYY-MM-DDTHH:MM:SSZ")}) catch |err| {
+            log.err("Unexpected error while building completed property: {s}", .{@errorName(err)});
+            return;
+        };
+        const completed = completed_writer.buffered();
+        break :compute_parts [_][]const u8{ prefix, status, before_completed, completed, suffix };
+    };
+    log.info("Successfully parsed task description file contents", .{});
+
+    moveTaskData(allocator, &gila_dir, self.positional.task, result.status, gila.Status.done) catch return;
+
+    var task_file_buffer: [32]u8 = undefined;
+    var md_file_writer = std.Io.Writer.fixed(&task_file_buffer);
     md_file_writer.print("{s}.md", .{self.positional.task}) catch unreachable;
     const task_file_name = md_file_writer.buffered();
-    const file_name = std.fs.path.join(allocator, &.{
-        gila_path,
-        "done",
-        self.positional.task,
-        task_file_name,
-    }) catch |err| {
+
+    const done_file_name = std.fs.path.join(allocator, &.{ "done", self.positional.task, task_file_name }) catch |err| {
         log.err("Unexpected error while joining done/{s}: {s}", .{ self.positional.task, @errorName(err) });
         return;
     };
 
-    log.debug("File path for editor: {s}", .{file_name});
+    {
+        const done_file = gila_dir.openFile(done_file_name, .{ .mode = .write_only }) catch |err| {
+            log.err("Failed to open done file {s}: {s}", .{ done_file_name, @errorName(err) });
+            return;
+        };
+        defer done_file.close();
 
-    // @TODO make the default editor configurable
-    const editor_name = std.process.getEnvVarOwned(allocator, "EDITOR") catch "vim";
-    var editor = std.process.Child.init(&.{ editor_name, "+", file_name }, std.heap.page_allocator);
-    editor.spawn() catch |err| {
-        log.err("Failed to spawn editor {s}: {s}", .{ editor_name, @errorName(err) });
-        return;
-    };
-    log.debug("Opened editor {s} at {f}", .{ editor_name, stdx.DateTimeUTC.now() });
-    const exit_code = editor.wait() catch |err| {
-        log.err("Failed to open editor: {s}", .{@errorName(err)});
-        return;
-    };
-    log.debug("Editor exited with code {any} at {f}", .{ exit_code, stdx.DateTimeUTC.now() });
+        var write_buffer: [4096]u8 align(16) = undefined;
+        var file_writer = done_file.writer(&write_buffer);
+        const writer = &file_writer.interface;
+        // var writer = std.Io.Writer.fixed(&write_buffer);
 
-    const sub_path = std.fs.path.join(allocator, &.{ @tagName(result.status), self.positional.task }) catch |err| {
-        log.err("Unexpected error while joining {s}/{s}: {s}", .{ @tagName(result.status), self.positional.task, @errorName(err) });
-        return;
-    };
+        for (&parts) |part| {
+            writer.writeAll(part) catch |err| {
+                log.err("Failed to write to {s}.md: {s}", .{ self.positional.task, @errorName(err) });
+                return;
+            };
+        }
+        // @IMPORTANT I never forget to flush
+        writer.flush() catch |err| {
+            log.err("Failed to flush {s}.md: {s}", .{ self.positional.task, @errorName(err) });
+            return;
+        };
+        done_file.sync() catch |err| {
+            log.err("Failed to sync {s}.md: {s}", .{ self.positional.task, @errorName(err) });
+            return;
+        };
+    }
 
-    gila_dir.deleteTree(sub_path) catch |err| {
-        log.err("Failed to delete task {s}: {s}", .{ self.positional.task, @errorName(err) });
-        return;
-    };
-    log.info("successully deleted task {s}/{s}", .{ gila_path, sub_path });
+    var stdout = std.fs.File.stdout().writer(&.{});
+    stdout.interface.print("Successfully completed task {s}. Good job buddy!\n", .{self.positional.task}) catch unreachable;
+
+    if (self.edit) {
+        const file_name = std.fs.path.join(allocator, &.{ gila_path, done_file_name }) catch |err| {
+            log.err("Unexpected error while joining done/{s}: {s}", .{ self.positional.task, @errorName(err) });
+            return;
+        };
+        log.debug("File path for editor: {s}", .{file_name});
+        // @TODO make the default editor configurable
+        const editor_name = std.process.getEnvVarOwned(allocator, "EDITOR") catch "vim";
+        var editor = std.process.Child.init(&.{ editor_name, "+", file_name }, std.heap.page_allocator);
+        editor.spawn() catch |err| {
+            log.err("Failed to spawn editor {s}: {s}", .{ editor_name, @errorName(err) });
+            return;
+        };
+        log.debug("Opened editor {s} at {f}", .{ editor_name, stdx.DateTimeUTC.now() });
+        const exit_code = editor.wait() catch |err| {
+            log.err("Failed to open editor: {s}", .{@errorName(err)});
+            return;
+        };
+        log.debug("Editor exited with code {any} at {f}", .{ exit_code, stdx.DateTimeUTC.now() });
+    }
 }
 
-// @TODO this is probably a common functionality
-fn createDoneDescrptionFile(allocator: std.mem.Allocator, task_name: []const u8, gila_dir: *std.fs.Dir) ?std.fs.File {
-    const task_dir_name = std.fs.path.join(allocator, &.{ "done", task_name }) catch |err| {
-        log.err("Unexpected error while joining todo/{s}: {s}", .{ task_name, @errorName(err) });
-        return null;
+pub fn moveTaskData(allocator: std.mem.Allocator, gila_dir: *std.fs.Dir, task_name: []const u8, from: gila.Status, to: gila.Status) !void {
+    const from_folder = std.fs.path.join(allocator, &.{ @tagName(from), task_name }) catch |err| {
+        log.err("Unexpected error while joining {s}/{s}: {s}", .{ @tagName(from), task_name, @errorName(err) });
+        return;
     };
+    const to_folder = std.fs.path.join(allocator, &.{ @tagName(to), task_name }) catch |err| {
+        log.err("Unexpected error while joining {s}/{s}: {s}", .{ @tagName(to), task_name, @errorName(err) });
+        return;
+    };
+    gila_dir.rename(from_folder, to_folder) catch |err| {
+        log.err("Failed to move task {s} from {s} to {s}: {s}", .{ task_name, @tagName(from), @tagName(to), @errorName(err) });
+    };
+    log.info("Successfully moved task folder along with all artifacts {s} from {s} to {s}", .{ task_name, @tagName(from), @tagName(to) });
+}
 
-    const result = gila_dir.makePathStatus(task_dir_name) catch |err| {
-        log.err("Failed to create task directory {s}: {s}", .{ task_name, @errorName(err) });
+const SplitResult = struct {
+    prefix_end: usize,
+    status_end: usize,
+    completed_location: usize,
+};
+fn splitTaskDescription(file_buffer: []const u8, gila_path: []const u8, task_name: []const u8) ?SplitResult {
+    var result: SplitResult = undefined;
+    const needle = "status: ";
+    result.prefix_end = std.mem.find(u8, file_buffer, needle) orelse {
+        log.err("Malformed task description: could not find the status property in the task file {s}", .{task_name});
         return null;
     };
-    if (result == .existed) {
-        log.err("Task {s} already exists. If you want to create a new task you can wait for 1 second and try again.", .{task_name});
+    result.prefix_end += needle.len;
+
+    result.status_end = std.mem.findScalar(u8, file_buffer[result.prefix_end..], '\n') orelse {
+        log.err("Malformed task description: could not find the end of the status property in the task file {s}", .{task_name});
+        return null;
+    };
+    if (result.status_end == 0) {
+        log.err("Malformed task description: status property is empty in the task file {s}", .{task_name});
         return null;
     }
-    log.info("Successfully created task directory done/{s}", .{task_name});
-
-    var task_dir = gila_dir.openDir(task_dir_name, .{}) catch |err| {
-        log.err("Failed to open task {s}: {s}", .{ task_dir_name, @errorName(err) });
+    const header_end = std.mem.find(u8, file_buffer[result.prefix_end + result.status_end ..], gila.seperator) orelse {
+        log.err("Malformed task description: Cound not find header end separator {s} in the task file {s}", .{ gila.seperator, task_name });
         return null;
     };
-    defer task_dir.close();
-    log.debug("Opened task directory {s}", .{task_dir_name});
+    const remaining_header = file_buffer[result.prefix_end + result.status_end ..][0..header_end];
 
-    var buffer: [1024]u8 = undefined;
-    const file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{task_name}) catch |err| {
-        log.err("Unexpectedly failed to create name for task {s}: {s}", .{ task_name, @errorName(err) });
+    const completed_start = std.mem.find(u8, remaining_header, "completed: ");
+    if (completed_start) |pos| {
+        log.err("Unexpected completed property in a task that is not completed in task file {s}/{s}:{d}", .{ gila_path, task_name, pos });
         return null;
-    };
-
-    const description_file = task_dir.createFile(file_name, .{}) catch |err| {
-        log.err("Failed to create {s}.md file: {s}", .{ task_name, @errorName(err) });
-        return null;
-    };
-    log.info("Successfully created description file {s}", .{file_name});
-    return description_file;
+    }
+    result.completed_location = std.mem.find(u8, remaining_header, "tags: ") orelse header_end;
+    return result;
 }

@@ -16,6 +16,7 @@ priority: gila.Priority = .medium,
 priority_value: u8 = 50,
 description: ?[]const u8 = null,
 verbose: bool = false,
+edit: bool = false,
 positional: struct {
     title: []const u8,
 },
@@ -24,7 +25,7 @@ pub const help =
     \\Usage:
     \\
     \\    gila todo [--priority=low|medium|high|urgent] [--priority-value=<value>] 
-    \\              [--description=<description>] [--verbose] <title>
+    \\              [--description=<description>] [--verbose] [--edit] <title>
     \\
     \\Create a new task to the current project.
     \\
@@ -44,6 +45,9 @@ pub const help =
     \\
     \\    --verbose 
     \\        Run verbosely. Prints the contents of the task description file to stdout.
+    \\
+    \\    --edit
+    \\        Open the description file in the editor after creating the task and writing the header.
     \\
     \\    <title>
     \\        The title of the task.
@@ -131,26 +135,27 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
     log.info("Successfully written template to {s}.md", .{task_name});
 
     // @TODO make the default editor configurable
-    const editor_name = std.process.getEnvVarOwned(allocator, "EDITOR") catch "vim";
-
-    var md_file_writer = std.Io.Writer.fixed(&buffer);
-    md_file_writer.print("{s}.md", .{task_name}) catch unreachable;
-    const task_file_name = md_file_writer.buffered();
-    const file_name = std.fs.path.join(allocator, &.{ gila_dir_name, ".gila", "todo", task_name, task_file_name }) catch |err| {
-        log.err("Unexpected error while joining path: {s}", .{@errorName(err)});
-        return;
-    };
-    var editor = std.process.Child.init(&.{ editor_name, "+", file_name }, std.heap.page_allocator);
-    editor.spawn() catch |err| {
-        log.err("Failed to spawn editor {s}: {s}", .{ editor_name, @errorName(err) });
-        return;
-    };
-    log.debug("Opened editor {s} at {f}", .{ editor_name, stdx.DateTimeUTC.now() });
-    const exit_code = editor.wait() catch |err| {
-        log.err("Failed to open editor: {s}", .{@errorName(err)});
-        return;
-    };
-    log.debug("Editor exited with code {any} at {f}", .{ exit_code, stdx.DateTimeUTC.now() });
+    if (self.edit) {
+        const editor_name = std.process.getEnvVarOwned(allocator, "EDITOR") catch "vim";
+        var md_file_writer = std.Io.Writer.fixed(&buffer);
+        md_file_writer.print("{s}.md", .{task_name}) catch unreachable;
+        const task_file_name = md_file_writer.buffered();
+        const file_name = std.fs.path.join(allocator, &.{ gila_dir_name, ".gila", "todo", task_name, task_file_name }) catch |err| {
+            log.err("Unexpected error while joining path: {s}", .{@errorName(err)});
+            return;
+        };
+        var editor = std.process.Child.init(&.{ editor_name, "+", file_name }, std.heap.page_allocator);
+        editor.spawn() catch |err| {
+            log.err("Failed to spawn editor {s}: {s}", .{ editor_name, @errorName(err) });
+            return;
+        };
+        log.debug("Opened editor {s} at {f}", .{ editor_name, stdx.DateTimeUTC.now() });
+        const exit_code = editor.wait() catch |err| {
+            log.err("Failed to open editor: {s}", .{@errorName(err)});
+            return;
+        };
+        log.debug("Editor exited with code {any} at {f}", .{ exit_code, stdx.DateTimeUTC.now() });
+    }
 
     var stdout = std.fs.File.stdout().writer(&.{});
     stdout.interface.print("New task created at: {s}/.gila/todo/{s}/{s}.md\n", .{ gila_dir_name, task_name, task_name }) catch unreachable;

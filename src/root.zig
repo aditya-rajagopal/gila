@@ -63,7 +63,7 @@ pub const TaskId = struct {
     }
 
     pub fn format(self: TaskId, writer: *std.Io.Writer) !void {
-        try writer.print("{d}_{d}_{s}", .{ self.date_time.dateAsNumber(), self.date_time.timeAsNumber(), self.user_name });
+        try writer.print("{f}_{s}", .{ self.date_time.as(.YYYYMMDD_HHMMSS), self.user_name });
     }
 };
 

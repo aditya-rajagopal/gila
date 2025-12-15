@@ -12,6 +12,20 @@ It keeps your tasks as plain text files right inside your repo (in a handy `.gil
 
 Heavily inspired by the task system used by [Tsoding](https://www.youtube.com/@Tsoding).
 
+## Quick Start
+
+You'll need [Zig](https://ziglang.org/download/) installed.
+
+1.  **Build it:**
+    ```bash
+    zig build -Doptimize=ReleaseSafe
+    ```
+2.  **Run it:**
+    Add `zig-out/bin` to your PATH, or just run:
+    ```bash
+    ./zig-out/bin/gila --help
+    ```
+
 ## Why?
 
 Because `TODO` comments get lost, and I dont like JIRA for something like my recreational projects.
@@ -22,6 +36,36 @@ Because `TODO` comments get lost, and I dont like JIRA for something like my rec
 * Since it's just files, you can script it, grep it, or edit it with neovim(btw).
 
 ## Visuals
+
+**Example task file**
+````markdown
+---
+title: Flesh out test runner and maybe move to stdx
+status: todo
+priority: medium
+priority_value: 50
+owner: adiraj
+created: 2025-12-13T18:43:34Z
+tags:
+- testing
+- stdx
+---
+
+The custom test runner is currently a very barebones implementation. It should be able to run all the tests
+similar to the default test runner but we can define globals and such that exist in the `@import("root")` struct.
+
+Maybe this needs to live in the stdx library as a template? I am not sure how to achieve this.
+Maybe i can write the test runner main in stdx and you can write your own test runner and just set
+
+```zig
+const stdx = @import("stdx");
+
+pub var some_global_used_by_things: u64 = 0;
+
+pub fn main = stdx.test_runner;
+```
+````
+
 
 Since GILA uses standard YAML frontmatter, your tasks look great in tools that understand metadata.
 
@@ -43,19 +87,6 @@ Since GILA uses standard YAML frontmatter, your tasks look great in tools that u
   <figcaption style="font-size:0.9em; color: #888;"><i>You can even build a full dashboard in Obsidian.</i></figcaption>
 </figure>
 
-## Quick Start
-
-You'll need [Zig](https://ziglang.org/download/) installed.
-
-1.  **Build it:**
-    ```bash
-    zig build -Doptimize=ReleaseSafe
-    ```
-2.  **Run it:**
-    Add `zig-out/bin` to your PATH, or just run:
-    ```bash
-    ./zig-out/bin/gila init
-    ```
 
 <section>
   <h2>Spec essentials</h2>
@@ -110,24 +141,4 @@ gila todo --priority=high --priority-value=80 --tags="bug,renderer" --edit "Fix 
 ```bash
 # Marks the task as done and opens the editor at $EDITOR or vim by default
 gila done --edit 20251213_084840_adiraj
-```
-**Example task file**
-```markdown
----
-title: Flesh out test runner and maybe move to stdx
-status: todo
-priority: medium
-priority_value: 50
-owner: adiraj
-created: 2025-12-13T18:43:34Z
-tags:
-- testing
-- stdx
----
-
-The custom test runner is currently a very barebones implementation. It should be able to run all the tests
-similar to the default test runner but we can define globals and such that exist in the `@import("root")` struct.
-
-Maybe this needs to live in the stdx library as a template? I am not sure how to achieve this.
-Maybe i can write the test runner main in stdx and you can write your own test runner and just set
 ```

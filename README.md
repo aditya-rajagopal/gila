@@ -118,7 +118,7 @@ gila done 20251213_084840_adiraj</code></pre>
     <figcaption style="font-size:0.9em;">Obsidian Dataview-style table built directly from task frontmatter.</figcaption>
   </figure>
 
-  <h3>Todo example (mirrors <code>.gila/todo/20251213_184334_adiraj/20251213_184334_adiraj.md</code>)</h3>
+  <h3>Todo example</h3>
   <pre><code>---
 title: Flesh out test runner and maybe move to stdx
 status: todo

@@ -69,7 +69,8 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
         return;
     }
 
-    const gila_dir_name = common.searchForGilaDir(allocator) orelse return;
+    const gila_path, var gila_dir = common.getGilaDir(allocator) orelse return;
+    defer gila_dir.close();
 
     const task_id: gila.TaskId = gila.TaskId.new(allocator) catch |err| {
         log.err("Failed to get user environment variable: {s}", .{@errorName(err)});
@@ -83,7 +84,7 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
     };
     log.debug("Generated task_id: {s}", .{task_name});
 
-    const description_file = self.createTodoDescrptionFile(allocator, gila_dir_name, task_name) orelse return;
+    const description_file = createNewDescription(allocator, task_name, gila_dir) orelse return;
     defer description_file.close();
 
     var buffer: [4096]u8 = undefined;
@@ -150,7 +151,7 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
         var md_file_writer = std.Io.Writer.fixed(&buffer);
         md_file_writer.print("{s}.md", .{task_name}) catch unreachable;
         const task_file_name = md_file_writer.buffered();
-        const file_name = std.fs.path.join(allocator, &.{ gila_dir_name, ".gila", "todo", task_name, task_file_name }) catch |err| {
+        const file_name = std.fs.path.join(allocator, &.{ gila_path, ".gila", "todo", task_name, task_file_name }) catch |err| {
             log.err("Unexpected error while joining path: {s}", .{@errorName(err)});
             return;
         };
@@ -168,24 +169,13 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
     }
 
     var stdout = std.fs.File.stdout().writer(&.{});
-    stdout.interface.print("New task created at: {s}/.gila/todo/{s}/{s}.md\n", .{ gila_dir_name, task_name, task_name }) catch unreachable;
+    stdout.interface.print("New task created: {s}\n", .{task_name}) catch unreachable;
     return;
 }
 
 // @TODO this is probably a common functionality
-fn createTodoDescrptionFile(self: Todo, allocator: std.mem.Allocator, current_dir: []const u8, task_name: []const u8) ?std.fs.File {
-    const base_name = std.fs.path.join(allocator, &.{ current_dir, gila.dir_name }) catch |err| {
-        log.err("Unexpected error while joining {s}/{s}: {s}", .{ current_dir, gila.dir_name, @errorName(err) });
-        return null;
-    };
-    var gila_dir = std.fs.openDirAbsolute(base_name, .{}) catch |err| {
-        log.err("Failed to open .gila directory {s}: {s}", .{ base_name, @errorName(err) });
-        return null;
-    };
-    defer gila_dir.close();
-    log.info("Opened gila directory {s}", .{base_name});
-
-    const task_dir_name = std.fs.path.join(allocator, &.{ "todo", task_name }) catch |err| {
+fn createNewDescription(allocator: std.mem.Allocator, task_name: []const u8, gila_dir: std.fs.Dir) ?std.fs.File {
+    const task_dir_name = std.fs.path.join(allocator, &.{ @tagName(gila.Status.todo), task_name }) catch |err| {
         log.err("Unexpected error while joining todo/{s}: {s}", .{ task_name, @errorName(err) });
         return null;
     };
@@ -201,19 +191,16 @@ fn createTodoDescrptionFile(self: Todo, allocator: std.mem.Allocator, current_di
     log.info("Successfully created task directory todo/{s}", .{task_name});
 
     var task_dir = gila_dir.openDir(task_dir_name, .{}) catch |err| {
-        log.err("Failed to open task {s}/{s}: {s}", .{ base_name, task_dir_name, @errorName(err) });
+        log.err("Failed to open task {s}: {s}", .{ task_dir_name, @errorName(err) });
         return null;
     };
     defer task_dir.close();
     log.debug("Opened task directory {s}", .{task_dir_name});
 
-    var buffer: [1024]u8 = undefined;
-    const file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{task_name}) catch |err| {
-        log.err("Unexpectedly failed to create name for task {s}: {s}", .{ task_name, @errorName(err) });
-        return null;
-    };
+    var buffer: [32]u8 = undefined;
+    const file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{task_name}) catch unreachable;
 
-    const description_file = task_dir.createFile(file_name, .{ .read = self.verbose }) catch |err| {
+    const description_file = task_dir.createFile(file_name, .{}) catch |err| {
         log.err("Failed to create {s}.md file: {s}", .{ task_name, @errorName(err) });
         return null;
     };
@@ -226,10 +213,16 @@ fn validateTitle(title: []const u8) bool {
         log.err("Title cannot be empty", .{});
         return false;
     }
-    const invalid_char = std.mem.findAny(u8, title, "\r\n");
+    const invalids: []const u8 = "\r\n";
+    const invalid_char = std.mem.findAny(
+        u8,
+        title,
+        invalids,
+    );
 
     if (invalid_char) |index| {
-        log.err("Title cannot contain {c} at index {d}", .{ title[index], index });
+        const invalids_escaped: []const u8 = "\\r\\n";
+        log.err("Title cannot contain any of '{s}'. Found one at index {d}", .{ invalids_escaped, index });
         return false;
     }
     return true;

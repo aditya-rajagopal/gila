@@ -27,6 +27,7 @@
   <h2>Introduction</h2>
   <p>GILA is a specification for local plain-text task tracking. The CLI here reads and manages those tasks as a reference implementation. The full spec lives in <a href="SPEC.md">SPEC.md</a>.</p>
   <p>Tasks stay as plain text under <code>.gila/</code>, so they remain human-readable, versionable, and portable. Any tool can consume the format defined in the spec.</p>
+  <p>Inspired by task system created by <a href="https://www.youtube.com/@Tsoding">Tsoding</a></p>
   <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start;">
     <figure style="margin:0;">
       <img src="screenshots/github-screenshot.png" alt="GitHub rendering of task frontmatter" width="420">

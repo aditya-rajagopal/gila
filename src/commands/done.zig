@@ -52,36 +52,21 @@ pub fn execute(self: Done, arena: *stdx.Arena) void {
         return;
     }
 
-    const pwd: []const u8 = std.process.getCwdAlloc(allocator) catch |err| {
-        log.err("Failed to get current directory: {s}", .{@errorName(err)});
-        return;
-    };
-    const gila_path = std.fs.path.join(allocator, &.{ common.searchForGilaDir(pwd) orelse return, gila.dir_name }) catch unreachable;
-
-    var gila_dir = std.fs.openDirAbsolute(gila_path, .{}) catch |err| {
-        log.err("Failed to open .gila directory {s}: {s}", .{ gila_path, @errorName(err) });
-        return;
-    };
+    const gila_path, var gila_dir = common.getGilaDir(allocator) orelse return;
     defer gila_dir.close();
-    log.info("Opened gila directory {s}", .{gila_path});
 
-    const result = gila.Task.find(allocator, self.positional.task, gila_dir) catch return;
+    var file, const status = gila.Task.find(allocator, self.positional.task, gila_dir) orelse return;
 
-    var file = result.file orelse {
-        log.err("Task {s} does not exist in gila directory {s}", .{ self.positional.task, gila_path });
-        return;
-    };
-
-    if (result.status == .done) {
+    if (status == .done) {
         log.err("Task {s} found in the done directory.", .{self.positional.task});
         log.debug("TODO: Check if the task status in the file is actually done. Since that is the source of truth", .{});
         return;
     }
-    if (result.status == .cancelled) {
+    if (status == .cancelled) {
         log.debug("TODO: What to do when a task is cancelled?", .{});
         return;
     }
-    if (result.status == .waiting) {
+    if (status == .waiting) {
         log.debug("TODO: Check if all the tasks that this task are waiting on are done.", .{});
         return;
     }
@@ -144,7 +129,7 @@ pub fn execute(self: Done, arena: *stdx.Arena) void {
         .capacity = 32,
     };
 
-    common.moveTaskData(allocator, gila_dir, self.positional.task, result.status, gila.Status.done) catch return;
+    common.moveTaskData(allocator, gila_dir, self.positional.task, status, gila.Status.done) catch return;
 
     var task_file_buffer: [32]u8 = undefined;
     const task_file_name = std.fmt.bufPrint(&task_file_buffer, "{s}.md", .{self.positional.task}) catch unreachable;
@@ -168,7 +153,6 @@ pub fn execute(self: Done, arena: *stdx.Arena) void {
         log.err("Failed to write to {s}.md: {s}", .{ self.positional.task, @errorName(err) });
         return;
     };
-
     // @IMPORTANT I never forget to flush
     writer.flush() catch |err| {
         log.err("Failed to flush {s}.md: {s}", .{ self.positional.task, @errorName(err) });

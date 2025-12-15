@@ -69,12 +69,7 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
         return;
     }
 
-    const pwd: []const u8 = std.process.getCwdAlloc(allocator) catch |err| {
-        log.err("Failed to get current directory: {s}", .{@errorName(err)});
-        return;
-    };
-    log.debug("Current directory: {s}", .{pwd});
-    const gila_dir_name = common.searchForGilaDir(pwd) orelse return;
+    const gila_dir_name = common.searchForGilaDir(allocator) orelse return;
 
     const task_id: gila.TaskId = gila.TaskId.new(allocator) catch |err| {
         log.err("Failed to get user environment variable: {s}", .{@errorName(err)});

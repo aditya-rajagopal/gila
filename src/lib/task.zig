@@ -34,7 +34,7 @@ pub fn parse(
         return error.Invalid;
     }
     if (!std.mem.eql(u8, buffer[0 .. gila.seperator.len + 1], gila.seperator ++ "\n")) {
-        error_out.* = "Task description file does not start with `" ++ gila.seperator ++ "\n`";
+        error_out.* = "Task description file does not start with `" ++ gila.seperator ++ "`";
         return error.Invalid;
     }
     const header_end = std.mem.find(u8, buffer[gila.seperator.len + 1 ..], gila.seperator) orelse {
@@ -153,53 +153,44 @@ fn write(comptime T: type, writer: *std.Io.Writer, data: T) !void {
     }
 }
 
-pub const FindResult = struct {
-    file: ?std.fs.File,
-    status: gila.Status,
-};
-const FindError = error{
-    FailedToOpenGilaDirectory,
-    TaskNotFound,
-} || std.fs.File.OpenError;
-pub fn find(gpa: std.mem.Allocator, task_name: []const u8, gila_dir: std.fs.Dir) FindError!FindResult {
+pub fn find(gpa: std.mem.Allocator, task_name: []const u8, gila_dir: std.fs.Dir) ?struct { std.fs.File, gila.Status } {
     var buffer: [128]u8 = undefined;
-    var writer = std.Io.Writer.fixed(&buffer);
-    writer.print("{s}.md", .{task_name}) catch unreachable;
-    const task_file_name = writer.buffered();
+    const task_file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{task_name}) catch unreachable;
 
     const fixed_buffer: []u8 = gpa.alloc(u8, std.fs.max_path_bytes) catch |err| {
         log.err("Failed to allocate path buffer: {s}", .{@errorName(err)});
-        return error.FailedToOpenGilaDirectory;
+        return null;
     };
     defer gpa.free(fixed_buffer);
     var path_arena = std.heap.FixedBufferAllocator.init(fixed_buffer);
 
-    var result: FindResult = .{ .file = null, .status = .todo };
+    var tracking: ?usize = null;
     inline for (std.meta.fields(gila.Status)) |field| {
         path_arena.reset();
-        if (result.file == null) {
+        tracking = if (tracking == null) result: {
             const name = std.fs.path.join(path_arena.allocator(), &.{ field.name, task_name, task_file_name }) catch |err| {
                 log.err("Unexpected error when constructing path to task: {s}", .{@errorName(err)});
-                return error.FailedToOpenGilaDirectory;
+                return null;
             };
-            result.file = gila_dir.openFile(name, .{ .mode = .read_only }) catch |err| switch (err) {
-                error.FileNotFound => blk: {
+
+            const file = gila_dir.openFile(name, .{ .mode = .read_only }) catch |err| switch (err) {
+                error.FileNotFound => {
                     log.debug("Task {s} does not exist in {s} directory", .{ task_name, name });
-                    break :blk null;
+                    break :result null;
                 },
                 else => |e| {
                     log.err("Failed to open task {s}: {s}", .{ task_name, @errorName(e) });
-                    return e;
+                    return null;
                 },
             };
-            result.status = comptime std.meta.stringToEnum(gila.Status, field.name).?;
-            if (result.file) |_| {
-                log.debug("Found task {s} at {s}", .{ task_name, name });
-            }
-        }
+            const status = comptime std.meta.stringToEnum(gila.Status, field.name).?;
+            log.debug("Found task {s} at {s}", .{ task_name, name });
+            return .{ file, status };
+        } else null;
     }
 
-    return result;
+    log.err("Task {s} does not exist in gila directory", .{task_name});
+    return null;
 }
 
 test "Task.parse" {

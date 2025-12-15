@@ -20,7 +20,23 @@ pub fn moveTaskData(allocator: std.mem.Allocator, gila_dir: std.fs.Dir, task_nam
     log.info("Successfully moved task folder along with all artifacts {s} from {s} to {s}", .{ task_name, @tagName(from), @tagName(to) });
 }
 
-pub fn searchForGilaDir(pwd: []const u8) ?[]const u8 {
+pub fn getGilaDir(gpa: std.mem.Allocator) ?struct { []const u8, std.fs.Dir } {
+    const gila_path = std.fs.path.join(gpa, &.{ searchForGilaDir(gpa) orelse return null, gila.dir_name }) catch unreachable;
+
+    const gila_dir = std.fs.openDirAbsolute(gila_path, .{}) catch |err| {
+        log.err("Failed to open .gila directory {s}: {s}", .{ gila_path, @errorName(err) });
+        return null;
+    };
+    log.info("Opened gila directory {s}", .{gila_path});
+    return .{ gila_path, gila_dir };
+}
+
+pub fn searchForGilaDir(gpa: std.mem.Allocator) ?[]const u8 {
+    const pwd: []const u8 = std.process.getCwdAlloc(gpa) catch |err| {
+        log.err("Failed to get current directory: {s}", .{@errorName(err)});
+        return null;
+    };
+    log.debug("Current directory: {s}", .{pwd});
     var current_dir: []const u8 = pwd;
 
     outter_loop: for (0..128) |_| {

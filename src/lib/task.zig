@@ -153,6 +153,54 @@ fn write(comptime T: type, writer: *std.Io.Writer, data: T) !void {
     }
 }
 
+/// Returns the folder status of the task. The slices in task point to a buffer allocated on the arena.
+/// It is expected that the arena lifetime is atleast as long as you want the Task to exist.
+pub fn read(self: *Task, arena: *stdx.Arena, task_name: []const u8, gila_dir: std.fs.Dir) ?gila.Status {
+    if (!gila.TaskId.isValidFormat(task_name)) {
+        log.err("Invalid task_id `{s}` a task is of the form YYYYMMDD_HHMMSS_username", .{task_name});
+        return null;
+    }
+    var file, const status = gila.Task.find(arena.allocator(), task_name, gila_dir) orelse return null;
+    defer file.close();
+
+    const buffer = read_all: {
+        const size = file.getEndPos() catch |err| {
+            log.err("Failed to get file size: {s}", .{@errorName(err)});
+            return null;
+        };
+        log.debug("File size: {any}", .{size});
+
+        const buffer = arena.pushArray(u8, size);
+
+        file.seekTo(0) catch |err| {
+            log.err("Failed to seek to start of file: {s}", .{@errorName(err)});
+            return null;
+        };
+        const read_size = file.preadAll(buffer, 0) catch |err| {
+            log.err("Failed to read file: {s}", .{@errorName(err)});
+            return null;
+        };
+        assert(read_size == size);
+        break :read_all buffer;
+    };
+    log.info("Read description file contents: {d} bytes", .{buffer.len});
+
+    var error_out: ?[]const u8 = null;
+    self.parse(arena.allocator(), buffer, &error_out) catch {
+        log.err("Failed to parse task description file {s}: {s}", .{ task_name, error_out.? });
+        return null;
+    };
+
+    if (!std.mem.eql(u8, @tagName(status), self.status.data)) {
+        log.warn(
+            "Task '{s}' was found in the '{s}' folder but was marked as '{s}' in the description. The description file wins",
+            .{ task_name, @tagName(status), self.status.data },
+        );
+    }
+
+    return status;
+}
+
 pub fn find(gpa: std.mem.Allocator, task_name: []const u8, gila_dir: std.fs.Dir) ?struct { std.fs.File, gila.Status } {
     var buffer: [128]u8 = undefined;
     const task_file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{task_name}) catch unreachable;

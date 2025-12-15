@@ -6,7 +6,7 @@ pub fn build(b: *std.Build) void {
 
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
-    const stdx = b.dependency("stdx", .{}).module("stdx");
+    const stdx = b.dependency("stdx", .{ .target = target }).module("stdx");
 
     const mod = b.addModule("gila", .{
         .root_source_file = b.path("src/lib/root.zig"),
@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) void {
             .{ .name = "stdx", .module = stdx },
         },
     });
-    const zon_mod = b.addModule("zon", .{
+    const zon_mod = b.createModule(.{
         .root_source_file = b.path("build.zig.zon"),
         .target = target,
     });

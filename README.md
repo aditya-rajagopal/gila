@@ -1,25 +1,6 @@
-<pre style="font-family: 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace; font-variant-ligatures: none; line-height:1; letter-spacing:0.02em; margin:0; padding:0; white-space:pre;">
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣰⠏⣀⡤⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀ ⣀⡠⠊⠀⠐⡪⠴⠃⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠠⠊⠀⣀⣠⠤⢴⣊⠉⠁⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣀⣀⣀⡀⣀⣀⣾⣷⣶⠋⠉⠀⠀⠀⠈⠁⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⣀⣤⣶⠿⣋⡉⠿⠿⠇⢰⣶⣦⣭⡍⠙⢶⣦⡤⣤⣴⣦⣤⡀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⢀⣤⣊⠈⢫⣵⣾⣿⣧⢰⣶⣿⢸⣿⣿⣿⡇⣼⣿⡶⣠⣿⣿⣿⣿⣿⣮⣄⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⢀⣐⠋⠻⠟⢀⣄⢻⣿⣿⣿⣧⠉⠉⠘⣛⣛⡛⠃⢠⣬⡌⠿⠟⠿⠿⠿⢿⡿⠿⠈⠂
-⠀⠀⠀⠀⠀⠀⠀⢠⣾⡿⣡⣶⣦⡻⠿⠃⠙⢛⣩⣴⣆⠀⠚⠿⢿⡿⣛⣼⣛⡳⣤⣄⡀⠀⢀⣀⣀⣀⡴⣣
-⠀⠀⠀⠀⠀⠀⢀⠟⠛⢱⣿⣿⣿⣿⢗⡀⠀⠀⢻⡿⢛⠁⠉⠉⠈⠁⠠⡙⠶⡄⠀⠀⠉⠉⠉⠉⠁⠀⠀⠀
-⢀⡀⡄⢀⡀⠀⠸⣼⣿⡇⣨⣽⡻⠏⣾⣿⣦⡠⠊⠀⠀⠑⠒⠋⠉⠑⣧⠘⠇⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⡈⠣⡁⢜⡡⠆⢺⣦⢰⣶⣭⣭⠁⠀⠀⠉⡻⠁⠀⠀⠀⠀⠀⠀⠀⠀⠈⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠙⢖⠀⠀⠘⠲⢸⣿⢸⣿⣿⣿⠀⣿⣿⡶⠁⠀⠀⠀⠀⠀⠀    ╭██████╮  ██╮ ██╮     ╭██████╮ 
-⠀⠀⠙⠒⠐⢦⢠⣯⣈⡉⠉⢩⣤⣤⣭⠥⠤⣄⣄⠠⡄⠀⠀⠀⠀⠀⠀██╭════╯  ██║ ██║     ██╭═══██╮
-⠀⠀⠀⠀⠀⠀⠙⢿⣿⣧⣤⣼⣿⣿⣿⢀⡀⠈⠋⠌⡥⡚⠀⠀⠀⠀⠀██║  ███╮ ██║ ██║     ████████║
-⠀⠀⠀⠀⠀⠀⠀⠀⢻⠿⠿⠛⠛⢫⠉⠉⠘⢆⡀⢀⠒⠶⠆⠀⠀⠀⠀██║   ██║ ██║ ██║     ██╭═══██║
-⠀⠀⠀⠀⠀⠀⠀⠀⠈⣄⣠⣴⣶⣿⣧⡀⠀⠀⠉⠀⠀⠀⠀⠀⠀⠀ ╰██████╯║ ██║ ███████╮██║   ██║
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠸⣿⣿⣿⡿⠋⢙⣦⣄⣀⠀⠀⠀⠀⠀⠀⠀⠀ ╰══════╯ ╰═╯ ╰══════╯╰═╯   ╰═╯
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠘⢟⡁⠀⢠⣾⣿⣿⠏⠉⣿⣿⣿⠛⢻⣿⠝⠀⠀> local plain-text task tracking
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠙⠶⣿⣿⣿⡟⣀⢸⡿⠿⠿⠔⠊⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀     ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-</pre>
+<figure style="margin:0;">
+    <img src="screenshots/gila.png" alt="ascii-art" width="649">
+</figure>
 
 > **Warning:** GILA and this CLI are under active development. Expect breaking changes and rough edges while the spec and implementation stabilize.
 
@@ -30,11 +11,11 @@
   <p>Inspired by task system created by <a href="https://www.youtube.com/@Tsoding">Tsoding</a></p>
   <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start;">
     <figure style="margin:0;">
-      <img src="screenshots/github-screenshot.png" alt="GitHub rendering of task frontmatter" width="420">
+      <img src="screenshots/github-screenshot.png" alt="GitHub rendering of task frontmatter" width="360">
       <figcaption style="font-size:0.9em;">GitHub renders the frontmatter as a metadata table.</figcaption>
     </figure>
     <figure style="margin:0;">
-      <img src="screenshots/obsidian-screenshot.png" alt="Obsidian properties view of task frontmatter" width="420">
+      <img src="screenshots/obsidian-screenshot.png" alt="Obsidian properties view of task frontmatter" width="360">
       <figcaption style="font-size:0.9em;">Obsidian shows the same frontmatter as Properties.</figcaption>
     </figure>
   </div>

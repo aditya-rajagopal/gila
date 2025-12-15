@@ -55,15 +55,16 @@ pub fn execute(self: Done, arena: *stdx.Arena) void {
     const gila_path, var gila_dir = common.getGilaDir(allocator) orelse return;
     defer gila_dir.close();
 
-    var file, const status = gila.Task.find(allocator, self.positional.task, gila_dir) orelse return;
+    var task: gila.Task = undefined;
+    const status = task.read(arena, self.positional.task, gila_dir) orelse return;
 
-    if (status == .done) {
-        log.err("Task {s} found in the done directory.", .{self.positional.task});
-        log.debug("TODO: Check if the task status in the file is actually done. Since that is the source of truth", .{});
+    if (task.status.capacity == 0) {
+        log.err("Malformed task description: status property is empty in the task file {s}", .{self.positional.task});
         return;
     }
-    if (status == .cancelled) {
-        log.debug("TODO: What to do when a task is cancelled?", .{});
+
+    if (std.mem.eql(u8, "cancelled", task.status.data)) {
+        log.debug("TODO: Move to cancelled folder", .{});
         return;
     }
     if (status == .waiting) {
@@ -71,63 +72,34 @@ pub fn execute(self: Done, arena: *stdx.Arena) void {
         return;
     }
 
-    const buffer = read_all: {
-        const size = file.getEndPos() catch |err| {
-            log.err("Failed to get file size: {s}", .{@errorName(err)});
-            return;
-        };
-        log.debug("File size: {any}", .{size});
-
-        const buffer = arena.pushArray(u8, size);
-
-        file.seekTo(0) catch |err| {
-            log.err("Failed to seek to start of file: {s}", .{@errorName(err)});
-            return;
-        };
-        const read_size = file.preadAll(buffer, 0) catch |err| {
-            log.err("Failed to read file: {s}", .{@errorName(err)});
-            return;
-        };
-        assert(read_size == size);
-        break :read_all buffer;
-    };
-    log.info("Read description file contents: {d} bytes", .{buffer.len});
-    file.close();
-
-    var task: gila.Task = undefined;
-    var error_out: ?[]const u8 = null;
-    task.parse(allocator, buffer, &error_out) catch {
-        log.err("Failed to parse task description file {s}: {s}", .{ self.positional.task, error_out.? });
-        return;
-    };
-
-    if (task.status.capacity == 0) {
-        log.err("Malformed task description: status property is empty in the task file {s}", .{self.positional.task});
-        return;
-    }
-    if (task.completed != null) {
-        log.err("Unexpected completed property in a task that is not completed in task file {s}/{s}", .{
-            gila_path,
-            self.positional.task,
-        });
-        return;
-    }
     log.info("Successfully parsed task description file contents", .{});
 
-    const done_text = "done";
-    if (task.status.capacity >= done_text.len) {
-        @memcpy(task.status.data[0..done_text.len], done_text);
-        task.status.data = task.status.data[0..done_text.len];
+    if (std.mem.eql(u8, "done", task.status.data)) {
+        if (status == .done and task.completed != null) {
+            log.err("Task {s} is already marked as done and is in the right place", .{self.positional.task});
+            return;
+        }
+        if (status == .done and task.completed == null) {
+            log.warn("Task '{s}' was found in the done folder but has no completion time. Adding that", .{self.positional.task});
+        }
     } else {
-        task.status.data = arena.pushArray(u8, done_text.len);
-        @memcpy(task.status.data, done_text);
+        const done_text = "done";
+        if (task.status.capacity >= done_text.len) {
+            @memcpy(task.status.data[0..done_text.len], done_text);
+            task.status.data = task.status.data[0..done_text.len];
+        } else {
+            task.status.data = arena.pushArray(u8, done_text.len);
+            @memcpy(task.status.data, done_text);
+        }
     }
 
     var completed_buffer: [32]u8 = undefined;
-    task.completed = .{
-        .data = std.fmt.bufPrint(&completed_buffer, "{f}", .{stdx.DateTimeUTC.now().as(.@"YYYY-MM-DDTHH:MM:SSZ")}) catch unreachable,
-        .capacity = 32,
-    };
+    if (task.completed == null) {
+        task.completed = .{
+            .data = std.fmt.bufPrint(&completed_buffer, "{f}", .{stdx.DateTimeUTC.now().as(.@"YYYY-MM-DDTHH:MM:SSZ")}) catch unreachable,
+            .capacity = 32,
+        };
+    }
 
     common.moveTaskData(allocator, gila_dir, self.positional.task, status, gila.Status.done) catch return;
 
@@ -164,7 +136,7 @@ pub fn execute(self: Done, arena: *stdx.Arena) void {
     };
 
     var stdout = std.fs.File.stdout().writer(&.{});
-    stdout.interface.print("Successfully completed task {s}. Good job buddy!\n", .{self.positional.task}) catch unreachable;
+    stdout.interface.print("Successfully completed task {s}. Great success!\n", .{self.positional.task}) catch unreachable;
 
     if (self.edit) {
         const file_name = std.fs.path.join(allocator, &.{ gila_path, done_file_name }) catch |err| {

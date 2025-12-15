@@ -2,47 +2,60 @@
     <img src="screenshots/gila.png" alt="ascii-art" width="649">
 </figure>
 
-> **Warning:** GILA and this CLI are under active development. Expect breaking changes and rough edges while the spec and implementation stabilize.
+> 🚧 **Heads up:** GILA is currently in active development. Things might break, commands might change, and the lizard might bite.
 
-<section>
-  <h2>Introduction</h2>
-  <p>GILA is a specification for local plain-text task tracking. The CLI here reads and manages those tasks as a reference implementation. The full spec lives in <a href="SPEC.md">SPEC.md</a>.</p>
-  <p>Tasks stay as plain text under <code>.gila/</code>, so they remain human-readable, versionable, and portable. Any tool can consume the format defined in the spec.</p>
-  <p>Inspired by task system created by <a href="https://www.youtube.com/@Tsoding">Tsoding</a></p>
-  <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start;">
-    <figure style="margin:0;">
-      <img src="screenshots/github-screenshot.png" alt="GitHub rendering of task frontmatter" width="360">
-      <figcaption style="font-size:0.9em;">GitHub renders the frontmatter as a metadata table.</figcaption>
-    </figure>
-    <figure style="margin:0;">
-      <img src="screenshots/obsidian-screenshot.png" alt="Obsidian properties view of task frontmatter" width="360">
-      <figcaption style="font-size:0.9em;">Obsidian shows the same frontmatter as Properties.</figcaption>
-    </figure>
-  </div>
-</section>
+## What is GILA?
 
-<section>
-  <h3>Features</h3>
-  <ul>
-    <li>Local plain-text storage — never locked-in.</li>
-    <li>Task IDs are based on creation timestamp and username (<code>YYYYMMDD_HHMMSS_username</code>).</li>
-    <li>Each task is a Markdown file with YAML/Obsidian-style frontmatter for metadata.</li>
-    <li>Add tasks with titles, priorities, descriptions, and tags via the CLI or manually.</li>
-    <li>Version-control friendly (diffable text, predictable layout).</li>
-    <li>Extensible for your own scripts and automations — they’re just files.</li>
-  </ul>
-</section>
+**GILA** is a specificationf for a local task tracker meant to be used for small hobby projects.
 
-<section>
-  <h2>Installation</h2>
-  <p>You need the <a href="https://ziglang.org/download/">Zig compiler</a> on your PATH. Build from source:</p>
-  <ol>
-    <li><code>zig build</code> to produce <code>zig-out/bin/gila</code>.</li>
-    <li>Optionally add it to your PATH, e.g. <code>export PATH="$(pwd)/zig-out/bin:$PATH"</code>.</li>
-    <li>Run without installing: <code>zig build run -- &lt;args&gt;</code>.</li>
-    <li>Run tests: <code>zig build test</code>.</li>
-  </ol>
-</section>
+It keeps your tasks as plain text files right inside your repo (in a handy `.gila/` folder). It's built to be human-readable, version-control friendly, and portable.
+
+Heavily inspired by the task system used by [Tsoding](https://www.youtube.com/@Tsoding).
+
+## Why?
+
+Because `TODO` comments get lost, and I dont like JIRA for something like my recreational projects.
+
+* The tasks live where your code lives. Syncing your repo syncs your tasks.
+* Each task is just a Markdown file with simple frontmatter. Readable everywhere.
+* Tasks get timestamp-based IDs (`YYYYMMDD_HHMMSS_username`) so you can reference them anywhere.
+* Since it's just files, you can script it, grep it, or edit it with neovim(btw).
+
+## Visuals
+
+Since GILA uses standard YAML frontmatter, your tasks look great in tools that understand metadata.
+
+<div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-start;">
+  <figure style="margin:0;">
+    <img src="screenshots/github-screenshot.png" alt="GitHub rendering of task frontmatter" width="480">
+    <figcaption style="font-size:0.9em; color: #888;"><i>GitHub rendering the frontmatter as a table.</i></figcaption>
+  </figure>
+  <figure style="margin:0;">
+    <img src="screenshots/obsidian-screenshot.png" alt="Obsidian properties view of task frontmatter" width="480">
+    <figcaption style="font-size:0.9em; color: #888;"><i>Obsidian Properties view.</i></figcaption>
+  </figure>
+</div>
+
+<br>
+
+<figure style="margin:0;">
+  <img src="screenshots/obsidian-table.png" alt="Obsidian database/table view of tasks" width="820">
+  <figcaption style="font-size:0.9em; color: #888;"><i>You can even build a full dashboard in Obsidian.</i></figcaption>
+</figure>
+
+## Quick Start
+
+You'll need [Zig](https://ziglang.org/download/) installed.
+
+1.  **Build it:**
+    ```bash
+    zig build -Doptimize=ReleaseSafe
+    ```
+2.  **Run it:**
+    Add `zig-out/bin` to your PATH, or just run:
+    ```bash
+    ./zig-out/bin/gila init
+    ```
 
 <section>
   <h2>Spec essentials</h2>
@@ -55,53 +68,52 @@
   </ul>
 </section>
 
-<section>
-  <h2>CLI usage</h2>
-  <h3>Basic usage</h3>
-  <pre><code>gila [-h | --help]
+## Commands
+
+Here is how you drive the lizard:
+
+```
+gila [-h | --help]
 gila version
 gila init [-h | --help] [--bare] [<directory>]
-gila todo [--priority=low|medium|high|urgent] [--priority-value=&lt;integer value&gt;] \
-          [--description=&lt;description&gt;] [--tags="&lt;tag1&gt;,&lt;tag2&gt;,..."] [--verbose] \
-          [--edit] &lt;title&gt;
-gila done [-h | --help] [--verbose] [--edit] &lt;task_id&gt;</code></pre>
+gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>;] \
+          [--description=<description>;] [--tags="<tag1>,<tag2>,..."] [--verbose] \
+          [--edit] <title>
+gila done [-h | --help] [--verbose] [--edit] <task_id>
+```
 
-  <h3>Commands</h3>
-  <table>
-    <thead>
-      <tr><th>Command</th><th>Summary</th></tr>
-    </thead>
-    <tbody>
-      <tr><td><code>version</code></td><td>Prints the GILA CLI version.</td></tr>
-      <tr><td><code>init</code></td><td>Initializes a GILA project in the current or specified directory.</td></tr>
-      <tr><td><code>todo</code></td><td>Creates a new task in the project.</td></tr>
-      <tr><td><code>done</code></td><td>Moves a task to <code>done</code> and marks status as done.</td></tr>
-      <tr><td><code>tag</code></td><td>Adds tags to a task (coming soon).</td></tr>
-    </tbody>
-  </table>
+| Command | Description |
+| :--- | :--- |
+| `gila init` | Sets up a new GILA project in the current directory |
+| `gila todo` | Creates a new task in the current project |
+| `gila done` | Mark a task as done and moves it to the `done` folder |
+| `gila version` | Prints the version |
 
-  <h3>Options</h3>
-  <ul>
-    <li><code>-h</code>, <code>--help</code>: Prints help.</li>
-    <li>Other options are command-specific (see examples).</li>
-  </ul>
+### Examples
 
-  <h3>Examples</h3>
-  <pre><code>gila init
-gila todo --priority=low --priority-value=50 --description="This is a description" 'Title of the task'
-gila done 20251213_084840_adiraj</code></pre>
-</section>
+**Start a project:**
+```bash
+gila init
+```
 
-<section>
-  <h2>Example task files (frontmatter as properties)</h2>
-  <p>GitHub renders YAML frontmatter as a metadata table; Obsidian reads it as Properties. Dataview/DB-style views also work well:</p>
-  <figure style="margin:0;">
-    <img src="screenshots/obsidian-table.png" alt="Obsidian database/table view of tasks" width="840">
-    <figcaption style="font-size:0.9em;">Obsidian Dataview-style table built directly from task frontmatter.</figcaption>
-  </figure>
+**Create a task**
+```bash
+# Basic
+gila todo "Fix the memory leak in the renderer"
 
-  <h3>Todo example</h3>
-  <pre><code>---
+# More customizable and opens the file in your editor at $EDITOR or vim by default
+gila todo --priority=high --priority-value=80 --tags="bug,renderer" --edit "Fix the memory leak"
+# > New task created: 20251213_084840_adiraj
+```
+
+**Finish the task**
+```bash
+# Marks the task as done and opens the editor at $EDITOR or vim by default
+gila done --edit 20251213_084840_adiraj
+```
+**Example task file**
+```markdown
+---
 title: Flesh out test runner and maybe move to stdx
 status: todo
 priority: medium
@@ -117,22 +129,5 @@ The custom test runner is currently a very barebones implementation. It should b
 similar to the default test runner but we can define globals and such that exist in the `@import("root")` struct.
 
 Maybe this needs to live in the stdx library as a template? I am not sure how to achieve this.
-
-Maybe i can write the test runner main in stdx and you can write your own test runner and just set</code></pre>
-
-  <h3>Done example</h3>
-  <pre><code>---
-title: Test task to complete with new Task parser
-status: done
-priority: medium
-priority_value: 50
-owner: adiraj
-created: 2025-12-13T19:16:30Z
-completed: 2025-12-13T19:31:26Z
-tags:
-- parser
-- cleanup
----
-
-Resolved init panic caused by missing config; see logs in this folder.</code></pre>
-</section>
+Maybe i can write the test runner main in stdx and you can write your own test runner and just set
+```

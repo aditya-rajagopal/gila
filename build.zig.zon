@@ -1,7 +1,7 @@
 // GILA is not meant to be imported as a library, but rather as a CLI tool. This is purely just for the stdx dependency.
 .{
     .name = .gila,
-    .version = "0.1.0-dev",
+    .version = "0.1.5-dev",
     .fingerprint = 0x334e956c02fc7ad4, // Changing this has security and trust implications.
     .minimum_zig_version = "0.16.0-dev.923+06d9e3bc0",
     .dependencies = .{

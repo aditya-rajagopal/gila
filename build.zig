@@ -31,6 +31,26 @@ pub fn build(b: *std.Build) void {
         .root_module = exe_mod,
     });
 
+    const migrate = b.createModule(.{
+        .root_source_file = b.path("src/lib/id.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "stdx", .module = stdx },
+        },
+    });
+    const migrate_exe = b.addExecutable(.{
+        .name = "migrate",
+        .root_module = migrate,
+    });
+    b.installArtifact(migrate_exe);
+
+    const migrate_step = b.step("migrate", "Migrate from old id format");
+    const migrate_cmd = b.addRunArtifact(migrate_exe);
+    migrate_cmd.step.dependOn(b.getInstallStep());
+
+    migrate_step.dependOn(&migrate_cmd.step);
+
     b.installArtifact(exe);
 
     const run_step = b.step("run", "Run the app");

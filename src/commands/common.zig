@@ -1,9 +1,15 @@
 const std = @import("std");
 const assert = std.debug.assert;
 const log = std.log.scoped(.gila);
+const builtin = @import("builtin");
 
 const gila = @import("gila");
 const stdx = @import("stdx");
+
+pub fn getUserName(gpa: std.mem.Allocator) ![]const u8 {
+    const user_env = if (builtin.os.tag == .windows) "USERNAME" else "USER";
+    return std.process.getEnvVarOwned(gpa, user_env);
+}
 
 pub fn moveTaskData(allocator: std.mem.Allocator, gila_dir: std.fs.Dir, task_name: []const u8, from: gila.Status, to: gila.Status) !void {
     const from_folder = std.fs.path.join(allocator, &.{ @tagName(from), task_name }) catch |err| {

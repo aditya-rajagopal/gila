@@ -6,6 +6,7 @@ const assert = std.debug.assert;
 pub const logo = @embedFile("ascii.txt");
 pub const dir_name = ".gila";
 pub const Task = @import("task.zig");
+pub const id = @import("id.zig");
 
 const log = std.log.scoped(.gila);
 
@@ -25,6 +26,7 @@ pub const Status = enum(u8) {
     };
 };
 
+/// @DEPRECATED
 pub const TaskId = struct {
     date_time: stdx.DateTimeUTC,
     user_name: []const u8,

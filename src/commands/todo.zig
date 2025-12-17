@@ -72,17 +72,16 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
     const gila_path, var gila_dir = common.getGilaDir(allocator) orelse return;
     defer gila_dir.close();
 
-    const task_id: gila.TaskId = gila.TaskId.new(allocator) catch |err| {
-        log.err("Failed to get user environment variable: {s}", .{@errorName(err)});
-        return;
-    };
-    const task_name = std.fmt.allocPrint(allocator, "{f}", .{
-        task_id,
-    }) catch |err| {
-        log.err("Failed to allocate task name: {s}", .{@errorName(err)});
+    const task_name = gila.id.new(allocator) catch |err| {
+        log.err("Failed to get create task id: {s}", .{@errorName(err)});
         return;
     };
     log.debug("Generated task_id: {s}", .{task_name});
+    const user_name = common.getUserName(allocator) catch |err| {
+        log.err("Failed to get user name: {s}", .{@errorName(err)});
+        return;
+    };
+    const date_time = stdx.DateTimeUTC.now();
 
     const description_file = createNewDescription(allocator, task_name, gila_dir) orelse return;
     defer description_file.close();
@@ -96,8 +95,8 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
         @tagName(.todo),
         @tagName(self.priority),
         self.priority_value,
-        task_id.user_name,
-        task_id.date_time.as(.@"YYYY-MM-DDTHH:MM:SSZ"),
+        user_name,
+        date_time.as(.@"YYYY-MM-DDTHH:MM:SSZ"),
     }) catch |err| {
         log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
         return;

@@ -10,7 +10,6 @@ const zon = @import("zon");
 const Todo = @import("commands/todo.zig");
 const Init = @import("commands/init.zig");
 const Done = @import("commands/done.zig");
-const common = @import("commands/common.zig");
 
 pub const std_options: std.Options = .{
     .logFn = logFn,

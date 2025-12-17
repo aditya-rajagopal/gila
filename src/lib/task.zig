@@ -156,8 +156,8 @@ fn write(comptime T: type, writer: *std.Io.Writer, data: T) !void {
 /// Returns the folder status of the task. The slices in task point to a buffer allocated on the arena.
 /// It is expected that the arena lifetime is atleast as long as you want the Task to exist.
 pub fn read(self: *Task, arena: *stdx.Arena, task_name: []const u8, gila_dir: std.fs.Dir) ?gila.Status {
-    if (!gila.TaskId.isValidFormat(task_name)) {
-        log.err("Invalid task_id `{s}` a task is of the form YYYYMMDD_HHMMSS_username", .{task_name});
+    if (!gila.id.isValid(task_name)) {
+        log.err("Invalid task_id `{s}` a task is of the form word_word_ccc", .{task_name});
         return null;
     }
     var file, const status = gila.Task.find(arena.allocator(), task_name, gila_dir) orelse return null;

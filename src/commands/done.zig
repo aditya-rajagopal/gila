@@ -47,8 +47,8 @@ pub fn execute(self: Done, arena: *stdx.Arena) void {
     if (!self.verbose) {
         root.log_level = .warn;
     }
-    if (!gila.TaskId.isValidFormat(self.positional.task)) {
-        log.err("Invalid task_id `{s}` a task is of the form YYYYMMDD_HHMMSS_username", .{self.positional.task});
+    if (!gila.id.isValid(self.positional.task)) {
+        log.err("Invalid task_id `{s}` a task is of the form word_word_ccc", .{self.positional.task});
         return;
     }
 

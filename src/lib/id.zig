@@ -50,6 +50,17 @@ pub fn isValid(id: []const u8) bool {
     return true;
 }
 
+test "id" {
+    var ids = std.StringHashMap(void).init(std.testing.allocator);
+    defer ids.deinit();
+    for (0..1000) |_| {
+        const id = try new(std.testing.allocator);
+        const result = try ids.getOrPut(id);
+        try std.testing.expect(!result.found_existing);
+        try std.testing.expect(isValid(id));
+    }
+}
+
 const adjectives = [_][]const u8{
     "abandoned",   "able",        "absolute",    "adorable",     "academic",    "acceptable",  "acclaimed",   "accurate",
     "aching",      "acidic",      "acrobatic",   "active",       "actual",      "adept",       "admirable",   "admired",

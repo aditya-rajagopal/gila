@@ -114,6 +114,14 @@ For tools it is recommended to use atleast a total of `2^32` unique ids to avoid
 Also it is recommended to have(depending on the language) the use of a different dictionary of word for the first and second word.
 With one being an adjective and the other being a noun. This will help the id be more memorable and readable.
 
+With `2^32` ids, the chance of collision after generating:
+
+| Number of tasks | Collision probability |
+| :--- | :--- |
+| 1,000 | <0.01% |
+| 10,000 | 1.13% |
+| 77,000 | ~50% |
+
 Example:
 
 `blaring_magma_6kr`

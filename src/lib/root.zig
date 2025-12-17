@@ -110,3 +110,7 @@ pub const description_body_template =
     \\{s}
     \\
 ;
+
+test {
+    _ = std.testing.refAllDecls(@This());
+}

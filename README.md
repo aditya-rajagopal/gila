@@ -2,7 +2,7 @@
     <img src="screenshots/gila.png" alt="ascii-art" width="649">
 </figure>
 
-> 🚧 **Heads up:** GILA is currently in active development. Things might break, commands might change, and the lizard might bite.
+> 🚧 **Heads up:** GILA is currently in active development.
 
 ## What is GILA?
 
@@ -28,11 +28,14 @@ You'll need [Zig](https://ziglang.org/download/) installed.
 
 ## Why?
 
-Because `TODO` comments get lost, and I dont like JIRA for something like my recreational projects.
+I often have `TODO` comments littered throughout
+my codebase and I dont like it. It is easy to forget and hard to track. I also dislike tools like JIRA and Github issues for creating tasks as I usually just want
+some place to add information like images, debug logs, and thoughts for me to reference later. Lastly I value being able to 
+locally view all my tasks and check them in when I sync my repositories across multiple machines.
 
 * The tasks live where your code lives. Syncing your repo syncs your tasks.
 * Each task is just a Markdown file with simple frontmatter. Readable everywhere.
-* Tasks get timestamp-based IDs (`YYYYMMDD_HHMMSS_username`) so you can reference them anywhere.
+* Tasks get human readable IDs (`blaring_magma_6kr`) that are easy to remember and type.
 * Since it's just files, you can script it, grep it, or edit it with neovim(btw).
 
 ## Visuals
@@ -92,7 +95,7 @@ Since GILA uses standard YAML frontmatter, your tasks look great in tools that u
   <h2>Spec essentials</h2>
   <ul>
     <li>Tasks live under <code>.gila/</code> with folders named by status (e.g. <code>todo/</code>, <code>done/</code>).</li>
-    <li>Each task has an ID <code>YYYYMMDD_HHMMSS_username</code> (see <a href="SPEC.md#taskid">SPEC.md#taskid</a>) and a matching <code>task_id.md</code> file as source of truth.</li>
+    <li>Each task has an ID <code>word_word_ccc</code> (see <a href="SPEC.md#taskid">SPEC.md#taskid</a>) and a matching <code>task_id.md</code> file as source of truth.</li>
     <li>Status and priority are lowercase: <code>todo|done|in_progress|cancelled|waiting</code>; <code>low|medium|high|urgent</code>.</li>
     <li>If folder and file disagree, the header in the file wins.</li>
     <li>Header structure follows <a href="SPEC.md#task-description">SPEC.md#task-description</a>.</li>
@@ -134,11 +137,11 @@ gila todo "Fix the memory leak in the renderer"
 
 # More customizable and opens the file in your editor at $EDITOR or vim by default
 gila todo --priority=high --priority-value=80 --tags="bug,renderer" --edit "Fix the memory leak"
-# > New task created: 20251213_084840_adiraj
+# > New task created: scared_nimbus_5kw
 ```
 
 **Finish the task**
 ```bash
 # Marks the task as done and opens the editor at $EDITOR or vim by default
-gila done --edit 20251213_084840_adiraj
+gila done --edit scared_nimbus_5kw
 ```

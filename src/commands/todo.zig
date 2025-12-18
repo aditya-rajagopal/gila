@@ -150,7 +150,7 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
         var md_file_writer = std.Io.Writer.fixed(&buffer);
         md_file_writer.print("{s}.md", .{task_name}) catch unreachable;
         const task_file_name = md_file_writer.buffered();
-        const file_name = std.fs.path.join(allocator, &.{ gila_path, ".gila", "todo", task_name, task_file_name }) catch |err| {
+        const file_name = std.fs.path.join(allocator, &.{ gila_path, "todo", task_name, task_file_name }) catch |err| {
             log.err("Unexpected error while joining path: {s}", .{@errorName(err)});
             return;
         };

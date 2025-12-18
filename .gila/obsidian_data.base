@@ -16,16 +16,19 @@ views:
       - completed
       - tags
     sort:
+      - property: title
+        direction: DESC
+      - property: status
+        direction: DESC
       - property: created
         direction: DESC
       - property: formula.
         direction: ASC
-      - property: title
-        direction: DESC
       - property: priority_value
         direction: ASC
     columnSize:
-      note.title: 477
+      note.title: 334
       note.priority: 110
-      note.priority_value: 142
+      note.priority_value: 52
       note.created: 178
+      note.completed: 212

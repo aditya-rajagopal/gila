@@ -114,6 +114,7 @@ gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>;
           [--description=<description>;] [--tags="<tag1>,<tag2>,..."] [--verbose] \
           [--edit] <title>
 gila done [-h | --help] [--verbose] [--edit] <task_id>
+gila sync [-h | --help] [--verbose]
 ```
 
 | Command | Description |
@@ -121,6 +122,7 @@ gila done [-h | --help] [--verbose] [--edit] <task_id>
 | `gila init` | Sets up a new GILA project in the current directory |
 | `gila todo` | Creates a new task in the current project |
 | `gila done` | Mark a task as done and moves it to the `done` folder |
+| `gila sync` | Synchrnoize tasks when you modify them manually |
 | `gila version` | Prints the version |
 
 ### Examples

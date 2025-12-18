@@ -212,10 +212,9 @@ pub fn find(gpa: std.mem.Allocator, task_name: []const u8, gila_dir: std.fs.Dir)
     defer gpa.free(fixed_buffer);
     var path_arena = std.heap.FixedBufferAllocator.init(fixed_buffer);
 
-    var tracking: ?usize = null;
     inline for (std.meta.fields(gila.Status)) |field| {
         path_arena.reset();
-        tracking = if (tracking == null) result: {
+        result: {
             const name = std.fs.path.join(path_arena.allocator(), &.{ field.name, task_name, task_file_name }) catch |err| {
                 log.err("Unexpected error when constructing path to task: {s}", .{@errorName(err)});
                 return null;
@@ -224,7 +223,7 @@ pub fn find(gpa: std.mem.Allocator, task_name: []const u8, gila_dir: std.fs.Dir)
             const file = gila_dir.openFile(name, .{ .mode = .read_only }) catch |err| switch (err) {
                 error.FileNotFound => {
                     log.debug("Task {s} does not exist in {s} directory", .{ task_name, name });
-                    break :result null;
+                    break :result;
                 },
                 else => |e| {
                     log.err("Failed to open task {s}: {s}", .{ task_name, @errorName(e) });
@@ -234,11 +233,123 @@ pub fn find(gpa: std.mem.Allocator, task_name: []const u8, gila_dir: std.fs.Dir)
             const status = comptime std.meta.stringToEnum(gila.Status, field.name).?;
             log.debug("Found task {s} at {s}", .{ task_name, name });
             return .{ file, status };
-        } else null;
+        }
     }
 
     log.err("Task {s} does not exist in gila directory", .{task_name});
     return null;
+}
+
+pub fn transition(self: *Task, gpa: std.mem.Allocator, to: gila.Status, error_out: *?[]const u8) error{Invalid}!void {
+    const status = std.meta.stringToEnum(gila.Status, self.status.data) orelse {
+        error_out.* = "Invalid status";
+        return error.Invalid;
+    };
+    switch (to) {
+        .todo => {
+            switch (status) {
+                .todo => {
+                    if (self.completed != null) {
+                        log.info("Task '{s}' is in todo state with a completed date and time. Removing it", .{self.title.data});
+                        self.completed = null;
+                    }
+                },
+                .done => {
+                    // NOTE: todo and done have the same length so this is safe
+                    const todo_text = "todo";
+                    @memcpy(self.status.data[0..todo_text.len], todo_text);
+                    self.status.data = self.status.data[0..todo_text.len];
+                    self.completed = null;
+                },
+                else => @panic("Not implemented"),
+            }
+        },
+        .done => {
+            switch (status) {
+                .todo => {
+                    const done_text = "done";
+                    @memcpy(self.status.data[0..done_text.len], done_text);
+                    self.status.data = self.status.data[0..done_text.len];
+                },
+                .done => {},
+                else => @panic("Not implemented"),
+            }
+            if (self.completed) |*completed| cont: {
+                _ = stdx.DateTimeUTC.fromString(completed.data, .@"YYYY-MM-DDTHH:MM:SSZ") catch |err| {
+                    log.err("Failed to parse completed date and time for Task '{s}': {s}. Redoing it", .{ self.title.data, @errorName(err) });
+                    break :cont;
+                };
+                return;
+            }
+
+            var completed: Buffer = self.completed orelse .{ .data = undefined, .capacity = 0 };
+            if (completed.capacity < @tagName(.@"YYYY-MM-DDTHH:MM:SSZ").len) {
+                completed.data = gpa.alloc(u8, @tagName(.@"YYYY-MM-DDTHH:MM:SSZ").len) catch {
+                    error_out.* = "Failed to allocate memory for completed date and time";
+                    return error.Invalid;
+                };
+                completed.capacity = @tagName(.@"YYYY-MM-DDTHH:MM:SSZ").len;
+            }
+            completed.data = std.fmt.bufPrint(completed.data, "{f}", .{stdx.DateTimeUTC.now().as(.@"YYYY-MM-DDTHH:MM:SSZ")}) catch {
+                error_out.* = "Failed to format completed date and time";
+                return error.Invalid;
+            };
+            self.completed = completed;
+        },
+        else => @panic("Not implemented"),
+    }
+}
+
+pub fn validate(self: *Task, error_out: *?[]const u8) error{Invalid}!void {
+    if (self.title.data.len == 0) {
+        error_out.* = "Task title cannot be empty";
+        return error.Invalid;
+    }
+
+    if (self.status.data.len == 0) {
+        error_out.* = "Task status cannot be empty";
+        return error.Invalid;
+    }
+
+    if (self.priority.data.len == 0) {
+        error_out.* = "Task priority cannot be empty";
+        return error.Invalid;
+    }
+
+    if (self.priority_value.data.len == 0) {
+        error_out.* = "Task priority_value cannot be empty";
+        return error.Invalid;
+    }
+    _ = std.fmt.parseInt(u8, self.priority_value.data, 10) catch |err| switch (err) {
+        error.Overflow => {
+            error_out.* = "Task priority_value cannot be larger than 255";
+            return error.Invalid;
+        },
+        else => {
+            error_out.* = "Failed to parse Task priority_value as an integer";
+            return error.Invalid;
+        },
+    };
+    if (self.owner.data.len == 0) {
+        error_out.* = "Task owner cannot be empty";
+        return error.Invalid;
+    }
+
+    if (self.created.data.len == 0) {
+        error_out.* = "Task created cannot be empty";
+        return error.Invalid;
+    }
+    _ = stdx.DateTimeUTC.fromString(self.created.data, .@"YYYY-MM-DDTHH:MM:SSZ") catch {
+        error_out.* = "Failed to parse Task created date and time in the format YYYY-MM-DDTHH:MM:SSZ";
+        return error.Invalid;
+    };
+
+    if (self.completed) |*completed| {
+        _ = stdx.DateTimeUTC.fromString(completed.data, .@"YYYY-MM-DDTHH:MM:SSZ") catch {
+            error_out.* = "Failed to parse completed date and time in the format YYYY-MM-DDTHH:MM:SSZ";
+            return error.Invalid;
+        };
+    }
 }
 
 test "Task.parse" {
@@ -288,6 +399,8 @@ test "Task.parse" {
 
     try std.testing.expectEqual(data.len, writer.buffered().len);
     try std.testing.expectEqualStrings(data, writer.buffered());
+
+    try task.validate(&error_out);
 
     if (task.tags) |tags| {
         std.testing.allocator.free(tags);

@@ -20,6 +20,10 @@ pub fn moveTaskData(allocator: std.mem.Allocator, gila_dir: std.fs.Dir, task_nam
         log.err("Unexpected error while joining {s}/{s}: {s}", .{ @tagName(to), task_name, @errorName(err) });
         return;
     };
+    gila_dir.makePath(@tagName(to)) catch |err| {
+        log.err("Failed to create directory {s}: {s}", .{ @tagName(to), @errorName(err) });
+        return;
+    };
     gila_dir.rename(from_folder, to_folder) catch |err| {
         log.err("Failed to move task {s} from {s} to {s}: {s}", .{ task_name, @tagName(from), @tagName(to), @errorName(err) });
     };

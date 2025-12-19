@@ -15,6 +15,7 @@ priority_value: Buffer,
 owner: Buffer,
 created: Buffer,
 completed: ?Buffer,
+waiting_on: ?[]Buffer,
 tags: ?[]Buffer,
 description: Buffer,
 
@@ -44,7 +45,10 @@ pub fn parse(
     const header: []u8 = buffer[gila.seperator.len + 1 ..][0..header_end];
 
     const fields = std.meta.fields(Task);
-    inline for (fields[0 .. fields.len - 1]) |field| {
+    inline for (fields) |field| {
+        if (comptime std.mem.eql(u8, field.name, "description")) {
+            continue;
+        }
         const line_prefix = field.name ++ ": ";
         const info = @typeInfo(field.type);
         const field_line_start: ?usize = std.mem.find(u8, header, line_prefix) orelse blk: {
@@ -123,7 +127,10 @@ pub fn parse(
 pub fn format(self: *const Task, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     try writer.print("{s}", .{gila.seperator});
     const fields = std.meta.fields(Task);
-    inline for (fields[0 .. fields.len - 1]) |field| {
+    inline for (fields) |field| {
+        if (comptime std.mem.eql(u8, field.name, "description")) {
+            continue;
+        }
         const line_prefix = field.name ++ ": ";
         const info = @typeInfo(field.type);
         if (info == .optional) {
@@ -362,6 +369,9 @@ test "Task.parse" {
         \\owner: adiraj
         \\created: 2025-12-13T08:42:53Z
         \\completed: 2025-12-13T08:43:53Z
+        \\waiting_on: 
+        \\- "[[word_word_ccc]]"
+        \\- "[[test_another_15c]]"
         \\tags: 
         \\- a
         \\- b
@@ -381,7 +391,15 @@ test "Task.parse" {
         try std.testing.expectEqualStrings("a", tags[0].data);
         try std.testing.expectEqualStrings("b", tags[1].data);
         try std.testing.expectEqualStrings("c", tags[2].data);
+    } else {
+        return error.TestExpectedTags;
     }
+    if (task.waiting_on) |waiting_on| {
+        try std.testing.expectEqual(@as(usize, 2), waiting_on.len);
+        try std.testing.expectEqualStrings("\"[[word_word_ccc]]\"", waiting_on[0].data);
+        try std.testing.expectEqualStrings("\"[[test_another_15c]]\"", waiting_on[1].data);
+    } else return error.TestExpectedWaitingOn;
+
     try std.testing.expectEqualStrings("test", task.title.data);
     try std.testing.expectEqualStrings("todo", task.status.data);
     try std.testing.expectEqualStrings("medium", task.priority.data);

@@ -94,7 +94,8 @@ pub const description_compeleted_template =
 ;
 
 pub const description_waiting_on_template =
-    \\waiting_on:
+    \\waiting_on: 
+    \\
 ;
 
 pub const description_tags_template =

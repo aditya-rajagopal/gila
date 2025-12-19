@@ -16,6 +16,7 @@ priority: gila.Priority = .medium,
 priority_value: u8 = 50,
 description: ?[]const u8 = null,
 tags: ?common.Tags = null,
+waiting_on: ?common.WaitingOn = null,
 verbose: bool = false,
 edit: bool = false,
 positional: struct {
@@ -26,7 +27,8 @@ pub const help =
     \\Usage:
     \\
     \\    gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>] 
-    \\              [--description=<description>] [--tags="<tag1>,<tag2>,..."] [--verbose] 
+    \\              [--description=<description>] [--tags="<tag1>,<tag2>,..."] 
+    \\              [--waiting-on="<task1>,<task2>,..."] [--verbose]
     \\              [--edit] <title>
     \\
     \\Create a new task to the current project.
@@ -42,8 +44,13 @@ pub const help =
     \\        The priority value of the task. Can be an integer between 0 to 255. Defaults to 50.
     \\
     \\    --description=<description>
-    \\
     \\        The description of the task.
+    \\
+    \\    --tags="<tag1>,<tag2>,..."
+    \\        The tags of the task. Should not contain any of '\n', '\r', '\t'.
+    \\
+    \\    --waiting-on="<task1>,<task2>,..."
+    \\        The tasks that this task depends on. Each task should be a valid task_id of the form `word_word_ccc'
     \\
     \\    --verbose 
     \\        Run verbosely. Prints the contents of the task description file to stdout.
@@ -101,6 +108,19 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
         log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
         return;
     };
+
+    if (self.waiting_on) |waiting_on| {
+        interface.writeAll(gila.description_waiting_on_template) catch |err| {
+            log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
+            return;
+        };
+        for (waiting_on.tasks) |task| {
+            interface.print("- \"[[{s}]]\"\n", .{task}) catch |err| {
+                log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
+                return;
+            };
+        }
+    }
 
     if (self.tags) |tags| {
         interface.writeAll(gila.description_tags_template) catch |err| {

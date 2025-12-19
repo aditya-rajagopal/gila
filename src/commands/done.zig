@@ -116,6 +116,10 @@ pub fn execute(self: Done, arena: *stdx.Arena) void {
         return;
     };
     defer done_file.close();
+    done_file.setEndPos(0) catch |err| {
+        log.err("Failed to set end position of done file {s}: {s}", .{ done_file_name, @errorName(err) });
+        return;
+    };
 
     var write_buffer: [4096]u8 align(16) = undefined;
     var file_writer = done_file.writer(&write_buffer);

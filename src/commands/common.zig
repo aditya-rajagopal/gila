@@ -77,6 +77,40 @@ pub fn searchForGilaDir(gpa: std.mem.Allocator) ?[]const u8 {
     return current_dir;
 }
 
+pub const WaitingOn = struct {
+    tasks: []const []const u8,
+
+    pub fn parseFlagValue(gpa: std.mem.Allocator, flag_value: []const u8, error_out: *?[]const u8) error{Invalid}!@This() {
+        if (flag_value.len == 0) {
+            error_out.* = "Empty tag list";
+            return error.Invalid;
+        }
+        const task_count: usize = std.mem.countScalar(u8, flag_value, ',');
+        var tasks = std.mem.splitScalar(u8, flag_value, ',');
+        const task_list = gpa.alloc([]const u8, task_count + 1) catch {
+            error_out.* = "Failed to allocate tag list";
+            return error.Invalid;
+        };
+        errdefer gpa.free(task_list);
+
+        for (0..task_count + 1) |index| {
+            const task = tasks.next().?;
+            if (task.len == 0) {
+                error_out.* = "Empty tag in list";
+                return error.Invalid;
+            }
+            if (!gila.id.isValid(task)) {
+                error_out.* = "Invalid task id in list";
+                return error.Invalid;
+            }
+            task_list[index] = task;
+        }
+        return .{
+            .tasks = task_list,
+        };
+    }
+};
+
 pub const Tags = struct {
     tags: []const []const u8,
 

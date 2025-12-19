@@ -16,9 +16,9 @@ views:
       - completed
       - tags
     sort:
-      - property: title
-        direction: DESC
       - property: status
+        direction: DESC
+      - property: title
         direction: DESC
       - property: created
         direction: DESC

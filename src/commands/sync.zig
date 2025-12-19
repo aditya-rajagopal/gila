@@ -168,6 +168,10 @@ fn getTaskAndFix(arena: *stdx.Arena, task_name: []const u8, gila_dir: std.fs.Dir
             return .err;
         };
         defer new_file.close();
+        new_file.setEndPos(0) catch |err| {
+            log.err("Failed to set end position of done file {s}: {s}", .{ new_file_name, @errorName(err) });
+            return .err;
+        };
 
         var write_buffer: [4096]u8 align(16) = undefined;
         var file_writer = new_file.writer(&write_buffer);

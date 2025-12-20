@@ -12,7 +12,7 @@ const log = std.log.scoped(.gila);
 
 pub const Status = enum(u8) {
     todo,
-    in_progress,
+    started,
     done,
     cancelled,
     waiting,

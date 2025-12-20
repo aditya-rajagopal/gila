@@ -20,7 +20,7 @@ tags: ?[]const []const u8,
 description: []const u8,
 extra_lines: ?[]const []const u8,
 
-const default = Task{
+pub const default = Task{
     .title = &.{},
     .status = undefined,
     .priority = undefined,
@@ -364,7 +364,7 @@ pub fn transition(self: *Task, to: gila.Status) error{Invalid}!void {
     }
 }
 
-pub fn validate(self: *Task, error_out: *?[]const u8) error{Invalid}!void {
+pub fn validate(self: *const Task, error_out: *?[]const u8) error{Invalid}!void {
     if (self.title.len == 0) {
         error_out.* = "Task title cannot be empty";
         return error.Invalid;

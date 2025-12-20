@@ -90,12 +90,9 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
     };
     const date_time = stdx.DateTimeUTC.now();
 
-    const description_file = createNewDescription(allocator, task_name, gila_dir) orelse return;
-    defer description_file.close();
-
     const task: gila.Task = .{
         .title = self.positional.title,
-        .status = .todo,
+        .status = if (self.waiting_on) |_| .waiting else .todo,
         .priority = self.priority,
         .priority_value = self.priority_value,
         .owner = user_name,
@@ -106,6 +103,13 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
         .completed = null,
         .extra_lines = null,
     };
+    var error_out: ?[]const u8 = null;
+    task.validate(&error_out) catch {
+        log.err("Failed to validate task description file {s}: {s}", .{ task_name, error_out.? });
+        return;
+    };
+
+    const description_file = createNewDescription(allocator, task_name, gila_dir, task.status) orelse return;
 
     var buffer: [4096]u8 = undefined;
     var writer = description_file.writer(&buffer);
@@ -128,13 +132,14 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
     };
     log.info("Successfully written template to {s}.md", .{task_name});
 
+    description_file.close();
+
     // @TODO make the default editor configurable
     if (self.edit) {
         const editor_name = std.process.getEnvVarOwned(allocator, "EDITOR") catch "vim";
-        var md_file_writer = std.Io.Writer.fixed(&buffer);
-        md_file_writer.print("{s}.md", .{task_name}) catch unreachable;
-        const task_file_name = md_file_writer.buffered();
-        const file_name = std.fs.path.join(allocator, &.{ gila_path, "todo", task_name, task_file_name }) catch |err| {
+        const task_file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{task_name}) catch unreachable;
+
+        const file_name = std.fs.path.join(allocator, &.{ gila_path, @tagName(task.status), task_name, task_file_name }) catch |err| {
             log.err("Unexpected error while joining path: {s}", .{@errorName(err)});
             return;
         };
@@ -157,8 +162,8 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
 }
 
 // @TODO this is probably a common functionality
-fn createNewDescription(allocator: std.mem.Allocator, task_name: []const u8, gila_dir: std.fs.Dir) ?std.fs.File {
-    const task_dir_name = std.fs.path.join(allocator, &.{ @tagName(gila.Status.todo), task_name }) catch |err| {
+fn createNewDescription(allocator: std.mem.Allocator, task_name: []const u8, gila_dir: std.fs.Dir, status: gila.Status) ?std.fs.File {
+    const task_dir_name = std.fs.path.join(allocator, &.{ @tagName(status), task_name }) catch |err| {
         log.err("Unexpected error while joining todo/{s}: {s}", .{ task_name, @errorName(err) });
         return null;
     };
@@ -171,7 +176,7 @@ fn createNewDescription(allocator: std.mem.Allocator, task_name: []const u8, gil
         log.err("Task {s} already exists. If you want to create a new task you can wait for 1 second and try again.", .{task_name});
         return null;
     }
-    log.info("Successfully created task directory todo/{s}", .{task_name});
+    log.info("Successfully created task directory {s}", .{task_dir_name});
 
     var task_dir = gila_dir.openDir(task_dir_name, .{}) catch |err| {
         log.err("Failed to open task {s}: {s}", .{ task_dir_name, @errorName(err) });

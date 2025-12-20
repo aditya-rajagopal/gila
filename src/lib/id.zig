@@ -329,7 +329,7 @@ fn migrateFromDateTimeToGecko(gpa: std.mem.Allocator) !void {
                 }
             }
         } else {
-            std.log.debug("Failed to open {s}\n", .{field.name});
+            log.debug("Failed to open {s}\n", .{field.name});
         }
     }
 }

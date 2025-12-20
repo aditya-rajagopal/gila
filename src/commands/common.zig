@@ -1,6 +1,6 @@
 const std = @import("std");
 const assert = std.debug.assert;
-const log = std.log.scoped(.gila);
+const log = std.log.scoped(.common);
 const builtin = @import("builtin");
 
 const gila = @import("gila");
@@ -103,7 +103,14 @@ pub const WaitingOn = struct {
                 error_out.* = "Invalid task id in list";
                 return error.Invalid;
             }
-            task_list[index] = task;
+            const task_ref: []u8 = gpa.alloc(u8, task.len + 6) catch {
+                error_out.* = "Failed to allocate task reference";
+                return error.Invalid;
+            };
+            @memcpy(task_ref[0..3], "\"[[");
+            @memcpy(task_ref[3..][0..task.len], task);
+            @memcpy(task_ref[3 + task.len ..], "]]\"");
+            task_list[index] = task_ref;
         }
         return .{
             .tasks = task_list,

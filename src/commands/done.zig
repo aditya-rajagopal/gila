@@ -3,7 +3,7 @@ const assert = std.debug.assert;
 const builtin = @import("builtin");
 const root = @import("root");
 
-const log = std.log.scoped(.gila);
+const log = std.log.scoped(.done);
 
 const gila = @import("gila");
 const stdx = @import("stdx");

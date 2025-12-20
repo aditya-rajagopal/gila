@@ -12,9 +12,9 @@ views:
       - title
       - priority
       - priority_value
-      - created
       - tags
       - status
+      - created
     sort:
       - property: status
         direction: DESC
@@ -29,11 +29,12 @@ views:
       - property: priority_value
         direction: ASC
     columnSize:
-      note.title: 560
-      note.priority: 110
-      note.priority_value: 82
+      note.title: 538
+      note.priority: 73
+      note.priority_value: 41
+      note.tags: 96
+      note.status: 71
       note.created: 178
-      note.status: 119
   - type: table
     name: Done Tasks
     filters:

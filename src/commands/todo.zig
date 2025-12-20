@@ -93,64 +93,27 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
     const description_file = createNewDescription(allocator, task_name, gila_dir) orelse return;
     defer description_file.close();
 
+    const task: gila.Task = .{
+        .title = self.positional.title,
+        .status = .todo,
+        .priority = self.priority,
+        .priority_value = self.priority_value,
+        .owner = user_name,
+        .created = date_time,
+        .description = if (self.description) |description| description else "",
+        .tags = if (self.tags) |tags| tags.tags else null,
+        .waiting_on = if (self.waiting_on) |waiting_on| waiting_on.tasks else null,
+        .completed = null,
+    };
+
     var buffer: [4096]u8 = undefined;
     var writer = description_file.writer(&buffer);
     const interface: *std.Io.Writer = &writer.interface;
 
-    interface.print(gila.description_header_template, .{
-        self.positional.title,
-        @tagName(.todo),
-        @tagName(self.priority),
-        self.priority_value,
-        user_name,
-        date_time.as(.@"YYYY-MM-DDTHH:MM:SSZ"),
-    }) catch |err| {
+    interface.print("{f}", .{task}) catch |err| {
         log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
         return;
     };
-
-    if (self.waiting_on) |waiting_on| {
-        interface.writeAll(gila.description_waiting_on_template) catch |err| {
-            log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
-            return;
-        };
-        for (waiting_on.tasks) |task| {
-            interface.print("- \"[[{s}]]\"\n", .{task}) catch |err| {
-                log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
-                return;
-            };
-        }
-    }
-
-    if (self.tags) |tags| {
-        interface.writeAll(gila.description_tags_template) catch |err| {
-            log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
-            return;
-        };
-        for (tags.tags) |tag| {
-            interface.print("- {s}\n", .{tag}) catch |err| {
-                log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
-                return;
-            };
-        }
-    }
-
-    interface.print(gila.seperator ++ "\n", .{}) catch |err| {
-        log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
-        return;
-    };
-
-    if (self.description) |description| {
-        interface.print(gila.description_body_template, .{description}) catch |err| {
-            log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
-            return;
-        };
-    } else {
-        interface.print(gila.description_body_template, .{""}) catch |err| {
-            log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
-            return;
-        };
-    }
 
     // @IMPORTANT I never forget to flush
     interface.flush() catch |err| {

@@ -18,6 +18,8 @@ views:
     sort:
       - property: status
         direction: DESC
+      - property: priority
+        direction: DESC
       - property: title
         direction: DESC
       - property: created
@@ -27,7 +29,8 @@ views:
       - property: priority_value
         direction: ASC
     columnSize:
-      note.title: 334
+      note.title: 424
+      note.status: 119
       note.priority: 110
       note.priority_value: 52
       note.created: 178

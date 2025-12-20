@@ -121,44 +121,38 @@ fn getTaskAndFix(arena: *stdx.Arena, task_name: []const u8, gila_dir: std.fs.Dir
     };
     defer file.close();
 
-    const stat = file.stat() catch |err| {
-        log.err("Failed to stat task {s}: {s}", .{ task_name, @errorName(err) });
+    var buffer: [4096]u8 = undefined;
+    var reader = file.reader(&buffer);
+    reader.interface.fillMore() catch {
+        log.err("Failed to read task description file {s}", .{task_name});
         return .err;
     };
 
-    const buffer: []u8 = arena.pushArray(u8, stat.size);
-    _ = file.readAll(buffer) catch |err| {
-        log.err("Failed to read task {s}: {s}", .{ task_name, @errorName(err) });
-        return .err;
-    };
     var task: gila.Task = undefined;
-    var error_out: ?[]const u8 = null;
-    task.parse(arena.allocator(), buffer, &error_out) catch {
-        log.err("Failed to parse task description file {s}: {s}", .{ task_name, error_out.? });
+    var diagnostic: ?gila.Task.Diagnostic = null;
+    task.parse(&reader.interface, arena, &diagnostic) catch {
+        log.err("{s}:{d}:{d}: Failed to parse: {s}", .{ file_path, diagnostic.?.line, diagnostic.?.column_start, diagnostic.?.message });
         return .err;
     };
+    var error_out: ?[]const u8 = null;
     task.validate(&error_out) catch {
         log.err("Failed to validate task description file {s}: {s}", .{ task_name, error_out.? });
         return .err;
     };
 
-    if (!std.mem.eql(u8, task.status.data, @tagName(folder_state))) {
+    if (task.status != folder_state) {
         log.info(
             "Task '{s}' is in the wrong state. Expected '{s}' based on the folder but found '{s}' in the description. The file is taken as the truth.",
-            .{ task_name, @tagName(folder_state), task.status.data },
+            .{ task_name, @tagName(folder_state), @tagName(task.status) },
         );
-        const to_state = std.meta.stringToEnum(gila.Status, task.status.data) orelse {
-            log.err("Invalid status '{s}' in the description file", .{task.status.data});
-            return .err;
-        };
-        task.transition(arena.allocator(), to_state, &error_out) catch {
-            log.err("Failed to transition task '{s}' to '{s}': {s}", .{ task_name, @tagName(to_state), error_out.? });
+        task.transition(task.status) catch {
+            log.err("Failed to transition task '{s}' to '{s}'", .{ task_name, @tagName(task.status) });
             return .err;
         };
 
-        common.moveTaskData(arena.allocator(), gila_dir, task_name, folder_state, to_state) catch return .err;
+        common.moveTaskData(arena.allocator(), gila_dir, task_name, folder_state, task.status) catch return .err;
 
-        const new_file_name = std.fs.path.join(arena.allocator(), &.{ task.status.data, task_name, file_name }) catch |err| {
+        const new_file_name = std.fs.path.join(arena.allocator(), &.{ @tagName(task.status), task_name, file_name }) catch |err| {
             log.err("Unexpected error while joining done/{s}: {s}", .{ task_name, @errorName(err) });
             return .err;
         };
@@ -190,8 +184,8 @@ fn getTaskAndFix(arena: *stdx.Arena, task_name: []const u8, gila_dir: std.fs.Dir
             log.err("Failed to sync {s}.md: {s}", .{ task_name, @errorName(err) });
             return .err;
         };
-        log.info("Successfully moved task {s} to {s}", .{ task_name, @tagName(to_state) });
-        return .{ .moved = to_state };
+        log.info("Successfully moved task {s} to {s}", .{ task_name, @tagName(task.status) });
+        return .{ .moved = task.status };
     }
     log.debug("Task '{s}' is good to go", .{task_name});
     return .ok;

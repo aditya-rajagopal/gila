@@ -8,124 +8,159 @@ const log = std.log.scoped(.gila);
 
 const Task = @This();
 
-title: Buffer,
-status: Buffer,
-priority: Buffer,
-priority_value: Buffer,
-owner: Buffer,
-created: Buffer,
-completed: ?Buffer,
-waiting_on: ?[]Buffer,
-tags: ?[]Buffer,
-description: Buffer,
+title: []const u8,
+status: gila.Status,
+priority_value: u8,
+priority: gila.Priority,
+owner: []const u8,
+created: stdx.DateTimeUTC,
+completed: ?stdx.DateTimeUTC,
+waiting_on: ?[]const []const u8,
+tags: ?[]const []const u8,
+description: []const u8,
 
-pub const Buffer = struct {
-    data: []u8,
-    capacity: usize,
+const default = Task{
+    .title = undefined,
+    .status = undefined,
+    .priority = undefined,
+    .priority_value = undefined,
+    .owner = undefined,
+    .created = undefined,
+    .completed = null,
+    .waiting_on = null,
+    .tags = null,
+    .description = undefined,
+};
+
+inline fn Error(diagnostics: *?Diagnostic, message: []const u8, line: usize, column_start: usize, column_end: usize) error{Invalid} {
+    diagnostics.* = .{
+        .line = line,
+        .column_start = column_start,
+        .column_end = column_end,
+        .message = message,
+    };
+    return error.Invalid;
+}
+
+pub const Diagnostic = struct {
+    line: usize,
+    column_start: usize,
+    column_end: usize,
+    message: []const u8,
 };
 
 pub fn parse(
     self: *Task,
-    gpa: std.mem.Allocator,
-    noalias buffer: []u8,
-    noalias error_out: *?[]const u8,
+    reader: *std.Io.Reader,
+    arena: *stdx.Arena,
+    diagnostics: *?Diagnostic,
 ) error{Invalid}!void {
-    if (buffer.len < 4) {
-        error_out.* = "Task description file has insufficient information";
-        return error.Invalid;
-    }
-    if (!std.mem.eql(u8, buffer[0 .. gila.seperator.len + 1], gila.seperator ++ "\n")) {
-        error_out.* = "Task description file does not start with `" ++ gila.seperator ++ "`";
-        return error.Invalid;
-    }
-    const header_end = std.mem.find(u8, buffer[gila.seperator.len + 1 ..], gila.seperator) orelse {
-        error_out.* = "Task description file does not contain header end separator `" ++ gila.seperator ++ "`";
-        return error.Invalid;
-    };
-    const header: []u8 = buffer[gila.seperator.len + 1 ..][0..header_end];
+    // @TODO [[elliptical_ogre_78v]]
+    self.* = default;
+    const seperator = (reader.takeDelimiter('\n') catch return Error(diagnostics, "Insufficient data", 0, 0, 0)) orelse return Error(diagnostics, "Insufficient data", 0, 0, 0);
+    if (!std.mem.eql(u8, seperator, gila.seperator)) return Error(diagnostics, "Task description file does not start with `" ++ gila.seperator ++ "`", 0, 0, 0);
 
-    const fields = std.meta.fields(Task);
-    inline for (fields) |field| {
-        if (comptime std.mem.eql(u8, field.name, "description")) {
-            continue;
+    var line = reader.takeDelimiter('\n') catch return Error(diagnostics, "Insufficient data", 1, 0, 0);
+    var line_number: usize = 0;
+
+    const fields = @typeInfo(Task).@"struct".fields;
+    // var task: Task = undefined;
+    var finished_header = false;
+    parsing_next_paramter: while (line) |l| {
+        line_number += 1;
+        if (std.mem.eql(u8, l, "---")) {
+            finished_header = true;
+            break;
         }
-        const line_prefix = field.name ++ ": ";
-        const info = @typeInfo(field.type);
-        const field_line_start: ?usize = std.mem.find(u8, header, line_prefix) orelse blk: {
-            if (info == .optional) {
-                break :blk null;
-            }
-            error_out.* = "Failed to find `" ++ line_prefix ++ "` in header";
-            return error.Invalid;
-        };
-        if (field_line_start) |line_start| {
-            const line_end = std.mem.findScalar(u8, header[line_start + line_prefix.len ..], '\n') orelse {
-                error_out.* = "Failed to find end of line for field '" ++ field.name ++ "' in header";
-                return error.Invalid;
-            };
-
-            const base_type = if (info == .optional) info.optional.child else field.type;
-            const base_info = @typeInfo(base_type);
-            switch (base_info) {
-                .pointer => |p| {
-                    comptime assert(p.size == .slice);
-                    var num_elements: usize = 0;
-                    var next_line = line_start + line_prefix.len + line_end + 1;
-                    while (std.mem.findScalar(u8, header[next_line..], '\n')) |end| {
-                        if (end < 2) {
-                            error_out.* = "Invalid tag start";
-                            return error.Invalid;
-                        }
-                        if (std.mem.eql(u8, header[next_line..][0..2], "- ")) {
-                            num_elements += 1;
-                            next_line += end + 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    if (num_elements == 0) {
-                        error_out.* = "Failed to find any elements in field '" ++ field.name ++ "' in header";
-                        return error.Invalid;
-                    }
-                    const elements = gpa.alloc(Buffer, num_elements) catch {
-                        error_out.* = "Failed to allocate buffer for field '" ++ field.name ++ "' in header";
-                        return error.Invalid;
-                    };
-                    next_line = line_start + line_prefix.len + line_end + 1;
-                    for (0..num_elements) |index| {
-                        const end = std.mem.findScalar(u8, header[next_line..], '\n').?;
-                        elements[index] = Buffer{
-                            .data = header[next_line..][2..end],
-                            .capacity = end - 2,
-                        };
-                        next_line += end + 1;
-                    }
-                    @field(self, field.name) = elements;
-                },
-                else => {
-                    const line = header[line_start + line_prefix.len ..][0..line_end];
-                    @field(self, field.name) = Buffer{
-                        .data = line,
-                        .capacity = line.len,
-                    };
-                },
-            }
-        } else {
-            if (info == .optional) {
-                @field(self, field.name) = null;
-                log.debug("Field '" ++ field.name ++ "' is optional and was not found in the header", .{});
+        inline for (fields) |field| {
+            if (std.mem.startsWith(u8, l, field.name)) {
+                var column: usize = field.name.len;
+                while (column < l.len and (l[column] == ' ' or l[column] == '\t')) {
+                    column += 1;
+                }
+                if (l[column] != ':') return Error(diagnostics, "Expected ':' after field name", line_number, column, column + 1);
+                column += 1;
+                while (column < l.len and (l[column] == ' ' or l[column] == '\t')) {
+                    column += 1;
+                }
+                comptime var T: type = field.type;
+                if (@typeInfo(field.type) == .optional) {
+                    T = @typeInfo(field.type).optional.child;
+                }
+                // @TODO Better error messages
+                const current_line_number = line_number;
+                var diagnostic: ?Diagnostic = null;
+                @field(self, field.name) = parseValue(T, arena, &line, &line_number, &column, reader, &diagnostic) catch return error.Invalid;
+                if (line_number > current_line_number) {
+                    continue :parsing_next_paramter;
+                }
+                line = reader.takeDelimiter('\n') catch return Error(diagnostics, "Insufficient data", line_number, 0, 0);
+                continue :parsing_next_paramter;
             }
         }
     }
-    const description_start = header_end + 2 * gila.seperator.len + 2;
-    self.description = Buffer{
-        .data = buffer[description_start..],
-        .capacity = buffer.len - description_start,
-    };
+    if (!finished_header) return Error(diagnostics, "Failed to find end of header", line_number, 0, 0);
+    self.description = reader.allocRemaining(arena.allocator(), @enumFromInt(arena.remainingCapacity())) catch return Error(diagnostics, "Failed to read description", line_number, 0, 0);
+}
+
+fn parseValue(
+    comptime T: type,
+    arena: *stdx.Arena,
+    line: *?[]u8,
+    line_number: *usize,
+    column: *usize,
+    reader: *std.Io.Reader,
+    diagnostics: *?Diagnostic,
+) error{Invalid}!T {
+    const l = line.* orelse return Error(diagnostics, "Missing parameter value", line_number.*, column.*, 0);
+    if (T == []const u8) {
+        if (l[column.*..].len == 0) return Error(diagnostics, "Missing parameter value", line_number.*, column.*, l.len);
+        return arena.pushString(l[column.*..]);
+    }
+    if (T == u8) {
+        if (l[column.*..].len == 0) return Error(diagnostics, "Missing parameter value", line_number.*, column.*, l.len);
+        return std.fmt.parseInt(u8, l[column.*..], 10) catch return Error(diagnostics, "Failed to parse parameter value as an integer", line_number.*, column.*, l.len);
+    }
+    if (T == stdx.DateTimeUTC) {
+        if (l[column.*..].len == 0) return Error(diagnostics, "Missing parameter value", line_number.*, column.*, l.len);
+        return stdx.DateTimeUTC.fromString(l[column.*..], .@"YYYY-MM-DDTHH:MM:SSZ") catch return Error(diagnostics, "Failed to parse parameter value as a YYYY-MM-DDTHH:MM:SSZ", line_number.*, column.*, l.len);
+    }
+    if (@typeInfo(T) == .@"enum") {
+        if (l[column.*..].len == 0) return Error(diagnostics, "Missing parameter value", line_number.*, column.*, l.len);
+        return std.meta.stringToEnum(T, l[column.*..]) orelse return Error(diagnostics, "Failed to parse parameter value as an enum of type " ++ @typeName(T), line_number.*, column.*, l.len);
+    }
+    if (T == []const []const u8) {
+        const start = arena.current;
+        if (l.len != column.*) return Error(diagnostics, "Unexpected data", line_number.*, column.*, l.len);
+        line.* = reader.takeDelimiter('\n') catch return Error(diagnostics, "Insufficient data", line_number.*, column.*, column.*);
+        var num_elements: usize = 0;
+        column.* = 0;
+        while (line.*) |nl| {
+            line_number.* += 1;
+            if (std.mem.startsWith(u8, nl, "- ")) {
+                if (nl.len < 3) return Error(diagnostics, "Insufficient data", line_number.*, column.*, column.*);
+                num_elements += 1;
+                _ = arena.pushString(nl);
+                line.* = reader.takeDelimiter('\n') catch return Error(diagnostics, "Buffer too small for line or read failed", line_number.*, column.*, column.*);
+            } else {
+                break;
+            }
+        }
+        if (num_elements == 0) return Error(diagnostics, "Failed to find any elements in field for a list parameter in header", line_number.*, column.*, column.*);
+        var lines = arena.memory[start..arena.current];
+        const elements = arena.pushArray([]const u8, num_elements);
+        for (0..num_elements) |index| {
+            lines = lines[2..];
+            const end = std.mem.indexOfScalar(u8, lines, '-') orelse lines.len;
+            elements[index] = arena.pushString(lines[0..end]);
+            lines = lines[end..];
+        }
+        return elements;
+    }
 }
 
 pub fn format(self: *const Task, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-    try writer.print("{s}", .{gila.seperator});
+    try writer.print("{s}\n", .{gila.seperator});
     const fields = std.meta.fields(Task);
     inline for (fields) |field| {
         if (comptime std.mem.eql(u8, field.name, "description")) {
@@ -135,28 +170,38 @@ pub fn format(self: *const Task, writer: *std.Io.Writer) std.Io.Writer.Error!voi
         const info = @typeInfo(field.type);
         if (info == .optional) {
             if (@field(self, field.name)) |field_buffer| {
-                try writer.print("\n{s}", .{line_prefix});
+                try writer.print("{s}", .{line_prefix});
                 try write(info.optional.child, writer, field_buffer);
             }
         } else {
-            try writer.print("\n{s}", .{line_prefix});
+            try writer.print("{s}", .{line_prefix});
             try write(field.type, writer, @field(self, field.name));
         }
     }
-    try writer.print("\n{s}\n", .{gila.seperator});
-    try writer.print("{s}", .{self.description.data});
+    try writer.print("{s}\n", .{gila.seperator});
+    try writer.print("{s}", .{self.description});
 }
 
 fn write(comptime T: type, writer: *std.Io.Writer, data: T) !void {
-    switch (@typeInfo(T)) {
-        .pointer => |p| {
-            comptime assert(p.size == .slice);
-            for (data) |item| {
-                try writer.print("\n- {s}", .{item.data});
-            }
-        },
-        .@"struct" => try writer.print("{s}", .{data.data}),
-        else => @compileError("Not supported"),
+    if (T == []const u8) {
+        try writer.print("{s}\n", .{data});
+    }
+    if (T == u8) {
+        try writer.print("{d}\n", .{data});
+    }
+    if (T == stdx.DateTimeUTC) {
+        try writer.print("{f}\n", .{data.as(.@"YYYY-MM-DDTHH:MM:SSZ")});
+    }
+    if (@typeInfo(T) == .@"enum") {
+        try writer.print("{s}\n", .{@tagName(data)});
+    }
+    if (T == []const []const u8) {
+        for (data) |field| {
+            try writer.writeByte('\n');
+            try writer.writeAll("- ");
+            try writer.writeAll(field);
+        }
+        try writer.writeByte('\n');
     }
 }
 
@@ -170,38 +215,22 @@ pub fn read(self: *Task, arena: *stdx.Arena, task_name: []const u8, gila_dir: st
     var file, const status = gila.Task.find(arena.allocator(), task_name, gila_dir) orelse return null;
     defer file.close();
 
-    const buffer = read_all: {
-        const size = file.getEndPos() catch |err| {
-            log.err("Failed to get file size: {s}", .{@errorName(err)});
-            return null;
-        };
-        log.debug("File size: {any}", .{size});
-
-        const buffer = arena.pushArray(u8, size);
-
-        file.seekTo(0) catch |err| {
-            log.err("Failed to seek to start of file: {s}", .{@errorName(err)});
-            return null;
-        };
-        const read_size = file.preadAll(buffer, 0) catch |err| {
-            log.err("Failed to read file: {s}", .{@errorName(err)});
-            return null;
-        };
-        assert(read_size == size);
-        break :read_all buffer;
+    var buffer: [4096]u8 = undefined;
+    var reader = file.reader(&buffer);
+    reader.interface.fillMore() catch {
+        log.err("Failed to read task description file {s}", .{task_name});
+        return null;
     };
-    log.info("Read description file contents: {d} bytes", .{buffer.len});
-
-    var error_out: ?[]const u8 = null;
-    self.parse(arena.allocator(), buffer, &error_out) catch {
-        log.err("Failed to parse task description file {s}: {s}", .{ task_name, error_out.? });
+    var diagnostic: ?Diagnostic = null;
+    self.parse(&reader.interface, arena, &diagnostic) catch {
+        log.err("Failed to parse task description file {s}: {s}", .{ task_name, diagnostic.?.message });
         return null;
     };
 
-    if (!std.mem.eql(u8, @tagName(status), self.status.data)) {
+    if (status != self.status) {
         log.warn(
             "Task '{s}' was found in the '{s}' folder but was marked as '{s}' in the description. The description file wins",
-            .{ task_name, @tagName(status), self.status.data },
+            .{ task_name, @tagName(status), @tagName(self.status) },
         );
     }
 
@@ -247,25 +276,20 @@ pub fn find(gpa: std.mem.Allocator, task_name: []const u8, gila_dir: std.fs.Dir)
     return null;
 }
 
-pub fn transition(self: *Task, gpa: std.mem.Allocator, to: gila.Status, error_out: *?[]const u8) error{Invalid}!void {
-    const status = std.meta.stringToEnum(gila.Status, self.status.data) orelse {
-        error_out.* = "Invalid status";
-        return error.Invalid;
-    };
+pub fn transition(self: *Task, to: gila.Status) error{Invalid}!void {
+    const status = self.status;
     switch (to) {
         .todo => {
             switch (status) {
                 .todo => {
                     if (self.completed != null) {
-                        log.info("Task '{s}' is in todo state with a completed date and time. Removing it", .{self.title.data});
+                        log.info("Task '{s}' is in todo state with a completed date and time. Removing it", .{self.title});
                         self.completed = null;
                     }
                 },
                 .done => {
                     // NOTE: todo and done have the same length so this is safe
-                    const todo_text = "todo";
-                    @memcpy(self.status.data[0..todo_text.len], todo_text);
-                    self.status.data = self.status.data[0..todo_text.len];
+                    self.status = .todo;
                     self.completed = null;
                 },
                 else => @panic("Not implemented"),
@@ -274,88 +298,30 @@ pub fn transition(self: *Task, gpa: std.mem.Allocator, to: gila.Status, error_ou
         .done => {
             switch (status) {
                 .todo => {
-                    const done_text = "done";
-                    @memcpy(self.status.data[0..done_text.len], done_text);
-                    self.status.data = self.status.data[0..done_text.len];
+                    self.status = .done;
                 },
                 .done => {},
                 else => @panic("Not implemented"),
             }
-            if (self.completed) |*completed| cont: {
-                _ = stdx.DateTimeUTC.fromString(completed.data, .@"YYYY-MM-DDTHH:MM:SSZ") catch |err| {
-                    log.err("Failed to parse completed date and time for Task '{s}': {s}. Redoing it", .{ self.title.data, @errorName(err) });
-                    break :cont;
-                };
+            if (self.completed) |_| {
                 return;
             }
-
-            var completed: Buffer = self.completed orelse .{ .data = undefined, .capacity = 0 };
-            if (completed.capacity < @tagName(.@"YYYY-MM-DDTHH:MM:SSZ").len) {
-                completed.data = gpa.alloc(u8, @tagName(.@"YYYY-MM-DDTHH:MM:SSZ").len) catch {
-                    error_out.* = "Failed to allocate memory for completed date and time";
-                    return error.Invalid;
-                };
-                completed.capacity = @tagName(.@"YYYY-MM-DDTHH:MM:SSZ").len;
-            }
-            completed.data = std.fmt.bufPrint(completed.data, "{f}", .{stdx.DateTimeUTC.now().as(.@"YYYY-MM-DDTHH:MM:SSZ")}) catch {
-                error_out.* = "Failed to format completed date and time";
-                return error.Invalid;
-            };
-            self.completed = completed;
+            self.completed = stdx.DateTimeUTC.now();
         },
         else => @panic("Not implemented"),
     }
 }
 
 pub fn validate(self: *Task, error_out: *?[]const u8) error{Invalid}!void {
-    if (self.title.data.len == 0) {
+    // @TODO [[weak_spark_74s]]
+    if (self.title.len == 0) {
         error_out.* = "Task title cannot be empty";
         return error.Invalid;
     }
 
-    if (self.status.data.len == 0) {
-        error_out.* = "Task status cannot be empty";
-        return error.Invalid;
-    }
-
-    if (self.priority.data.len == 0) {
-        error_out.* = "Task priority cannot be empty";
-        return error.Invalid;
-    }
-
-    if (self.priority_value.data.len == 0) {
-        error_out.* = "Task priority_value cannot be empty";
-        return error.Invalid;
-    }
-    _ = std.fmt.parseInt(u8, self.priority_value.data, 10) catch |err| switch (err) {
-        error.Overflow => {
-            error_out.* = "Task priority_value cannot be larger than 255";
-            return error.Invalid;
-        },
-        else => {
-            error_out.* = "Failed to parse Task priority_value as an integer";
-            return error.Invalid;
-        },
-    };
-    if (self.owner.data.len == 0) {
+    if (self.owner.len == 0) {
         error_out.* = "Task owner cannot be empty";
         return error.Invalid;
-    }
-
-    if (self.created.data.len == 0) {
-        error_out.* = "Task created cannot be empty";
-        return error.Invalid;
-    }
-    _ = stdx.DateTimeUTC.fromString(self.created.data, .@"YYYY-MM-DDTHH:MM:SSZ") catch {
-        error_out.* = "Failed to parse Task created date and time in the format YYYY-MM-DDTHH:MM:SSZ";
-        return error.Invalid;
-    };
-
-    if (self.completed) |*completed| {
-        _ = stdx.DateTimeUTC.fromString(completed.data, .@"YYYY-MM-DDTHH:MM:SSZ") catch {
-            error_out.* = "Failed to parse completed date and time in the format YYYY-MM-DDTHH:MM:SSZ";
-            return error.Invalid;
-        };
     }
 }
 
@@ -364,8 +330,8 @@ test "Task.parse" {
         \\---
         \\title: test
         \\status: todo
-        \\priority: medium
         \\priority_value: 50
+        \\priority: medium
         \\owner: adiraj
         \\created: 2025-12-13T08:42:53Z
         \\completed: 2025-12-13T08:43:53Z
@@ -384,30 +350,35 @@ test "Task.parse" {
     const data = try std.testing.allocator.dupe(u8, buffer);
     defer std.testing.allocator.free(data);
     var task: Task = undefined;
-    var error_out: ?[]const u8 = null;
-    try task.parse(std.testing.allocator, data, &error_out);
+    var diagnostic: ?Diagnostic = null;
+    var reader = std.Io.Reader.fixed(data);
+    var memory: [4096]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&memory);
+    task.parse(&reader, &arena, &diagnostic) catch {
+        return error.TestFailedToParse;
+    };
     if (task.tags) |tags| {
         try std.testing.expectEqual(@as(usize, 3), tags.len);
-        try std.testing.expectEqualStrings("a", tags[0].data);
-        try std.testing.expectEqualStrings("b", tags[1].data);
-        try std.testing.expectEqualStrings("c", tags[2].data);
+        try std.testing.expectEqualStrings("a", tags[0]);
+        try std.testing.expectEqualStrings("b", tags[1]);
+        try std.testing.expectEqualStrings("c", tags[2]);
     } else {
         return error.TestExpectedTags;
     }
     if (task.waiting_on) |waiting_on| {
         try std.testing.expectEqual(@as(usize, 2), waiting_on.len);
-        try std.testing.expectEqualStrings("\"[[word_word_ccc]]\"", waiting_on[0].data);
-        try std.testing.expectEqualStrings("\"[[test_another_15c]]\"", waiting_on[1].data);
+        try std.testing.expectEqualStrings("\"[[word_word_ccc]]\"", waiting_on[0]);
+        try std.testing.expectEqualStrings("\"[[test_another_15c]]\"", waiting_on[1]);
     } else return error.TestExpectedWaitingOn;
 
-    try std.testing.expectEqualStrings("test", task.title.data);
-    try std.testing.expectEqualStrings("todo", task.status.data);
-    try std.testing.expectEqualStrings("medium", task.priority.data);
-    try std.testing.expectEqualStrings("50", task.priority_value.data);
-    try std.testing.expectEqualStrings("adiraj", task.owner.data);
-    try std.testing.expectEqualStrings("2025-12-13T08:42:53Z", task.created.data);
-    try std.testing.expectEqualStrings("2025-12-13T08:43:53Z", task.completed.?.data);
-    try std.testing.expectEqualStrings("\ntest description\n", task.description.data);
+    try std.testing.expectEqualStrings("test", task.title);
+    try std.testing.expectEqual(.todo, task.status);
+    try std.testing.expectEqual(.medium, task.priority);
+    try std.testing.expectEqual(50, task.priority_value);
+    try std.testing.expectEqualStrings("adiraj", task.owner);
+    try std.testing.expectEqual(stdx.DateTimeUTC.fromString("2025-12-13T08:42:53Z", .@"YYYY-MM-DDTHH:MM:SSZ") catch unreachable, task.created);
+    try std.testing.expectEqual(stdx.DateTimeUTC.fromString("2025-12-13T08:43:53Z", .@"YYYY-MM-DDTHH:MM:SSZ") catch unreachable, task.completed.?);
+    try std.testing.expectEqualStrings("\ntest description\n", task.description);
 
     const output = try std.testing.allocator.alloc(u8, buffer.len);
     defer std.testing.allocator.free(output);
@@ -418,9 +389,6 @@ test "Task.parse" {
     try std.testing.expectEqual(data.len, writer.buffered().len);
     try std.testing.expectEqualStrings(data, writer.buffered());
 
+    var error_out: ?[]const u8 = null;
     try task.validate(&error_out);
-
-    if (task.tags) |tags| {
-        std.testing.allocator.free(tags);
-    }
 }

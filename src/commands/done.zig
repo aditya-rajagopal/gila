@@ -58,23 +58,18 @@ pub fn execute(self: Done, arena: *stdx.Arena) void {
     var task: gila.Task = undefined;
     const status = task.read(arena, self.positional.task, gila_dir) orelse return;
 
-    if (task.status.capacity == 0) {
-        log.err("Malformed task description: status property is empty in the task file {s}", .{self.positional.task});
-        return;
-    }
-
-    if (std.mem.eql(u8, "cancelled", task.status.data)) {
+    if (task.status == .cancelled) {
         log.debug("TODO: Move to cancelled folder", .{});
         return;
     }
-    if (status == .waiting) {
+    if (task.status == .waiting) {
         log.debug("TODO: Check if all the tasks that this task are waiting on are done.", .{});
         return;
     }
 
     log.info("Successfully parsed task description file contents", .{});
 
-    if (std.mem.eql(u8, "done", task.status.data)) {
+    if (task.status == .done) {
         if (status == .done and task.completed != null) {
             log.err("Task {s} is already marked as done and is in the right place", .{self.positional.task});
             return;
@@ -83,23 +78,10 @@ pub fn execute(self: Done, arena: *stdx.Arena) void {
             log.warn("Task '{s}' was found in the done folder but has no completion time. Adding that", .{self.positional.task});
         }
     } else {
-        const done_text = "done";
-        if (task.status.capacity >= done_text.len) {
-            @memcpy(task.status.data[0..done_text.len], done_text);
-            task.status.data = task.status.data[0..done_text.len];
-        } else {
-            task.status.data = arena.pushArray(u8, done_text.len);
-            @memcpy(task.status.data, done_text);
-        }
+        task.status = .done;
     }
 
-    var completed_buffer: [32]u8 = undefined;
-    if (task.completed == null) {
-        task.completed = .{
-            .data = std.fmt.bufPrint(&completed_buffer, "{f}", .{stdx.DateTimeUTC.now().as(.@"YYYY-MM-DDTHH:MM:SSZ")}) catch unreachable,
-            .capacity = 32,
-        };
-    }
+    task.completed = stdx.DateTimeUTC.now();
 
     common.moveTaskData(allocator, gila_dir, self.positional.task, status, gila.Status.done) catch return;
 

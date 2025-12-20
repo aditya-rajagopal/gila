@@ -18,6 +18,7 @@ completed: ?stdx.DateTimeUTC,
 waiting_on: ?[]const []const u8,
 tags: ?[]const []const u8,
 description: []const u8,
+extra_lines: ?[]const []const u8,
 
 const default = Task{
     .title = &.{},
@@ -30,6 +31,7 @@ const default = Task{
     .waiting_on = null,
     .tags = null,
     .description = &.{},
+    .extra_lines = null,
 };
 
 inline fn Error(diagnostics: *?Diagnostic, message: []const u8, line: usize, column_start: usize, column_end: usize) error{Invalid} {
@@ -63,7 +65,18 @@ pub fn parse(
     var line = reader.takeDelimiter('\n') catch return Error(diagnostics, "Insufficient data", 1, 0, 0);
     var line_number: usize = 0;
 
-    const fields = @typeInfo(Task).@"struct".fields;
+    var extra_lines: std.ArrayList([]const u8) = .empty;
+
+    const fields = comptime blk: {
+        var out: []const std.builtin.Type.StructField = &.{};
+        for (@typeInfo(Task).@"struct".fields) |field| {
+            if (std.mem.eql(u8, field.name, "extra_lines") or std.mem.eql(u8, field.name, "description")) {
+                continue;
+            }
+            out = out ++ &[_]std.builtin.Type.StructField{field};
+        }
+        break :blk out;
+    };
 
     var counts = comptime blk: {
         var count_fields = fields[0..fields.len].*;
@@ -115,6 +128,11 @@ pub fn parse(
                 continue :parsing_next_paramter;
             }
         }
+        extra_lines.append(arena.allocator(), arena.pushString(l)) catch return Error(diagnostics, "Failed to append extra line: Out of memory", line_number, 0, 0);
+        line = reader.takeDelimiter('\n') catch return Error(diagnostics, "Insufficient data", line_number, 0, 0);
+    }
+    if (extra_lines.items.len > 0) {
+        self.extra_lines = extra_lines.toOwnedSlice(arena.allocator()) catch return Error(diagnostics, "Failed to allocate extra lines: Out of memory", line_number, 0, 0);
     }
 
     inline for (fields) |field| {
@@ -192,7 +210,7 @@ pub fn format(self: *const Task, writer: *std.Io.Writer) std.Io.Writer.Error!voi
     try writer.print("{s}\n", .{gila.seperator});
     const fields = std.meta.fields(Task);
     inline for (fields) |field| {
-        if (comptime std.mem.eql(u8, field.name, "description")) {
+        if (comptime std.mem.eql(u8, field.name, "description") or std.mem.eql(u8, field.name, "extra_lines")) {
             continue;
         }
         const line_prefix = field.name ++ ": ";
@@ -205,6 +223,11 @@ pub fn format(self: *const Task, writer: *std.Io.Writer) std.Io.Writer.Error!voi
         } else {
             try writer.print("{s}", .{line_prefix});
             try write(field.type, writer, @field(self, field.name));
+        }
+    }
+    if (self.extra_lines) |extra_lines| {
+        for (extra_lines) |line| {
+            try writer.print("{s}\n", .{line});
         }
     }
     try writer.print("{s}\n", .{gila.seperator});
@@ -413,6 +436,33 @@ test "Task.parse" {
         \\status: todo
         \\priority_value: 50
         \\priority: medium
+        \\custom_property:
+        \\- text
+        \\- random
+        \\data: test
+        \\owner: adiraj
+        \\created: 2025-12-13T08:42:53Z
+        \\completed: 2025-12-13T08:43:53Z
+        \\waiting_on: 
+        \\- "[[word_word_ccc]]"
+        \\- "[[test_another_15c]]"
+        \\Random line
+        \\Another random line
+        \\tags: 
+        \\- a
+        \\- b
+        \\- c
+        \\---
+        \\
+        \\test description
+        \\
+    ;
+    const expected_write =
+        \\---
+        \\title: test
+        \\status: todo
+        \\priority_value: 50
+        \\priority: medium
         \\owner: adiraj
         \\created: 2025-12-13T08:42:53Z
         \\completed: 2025-12-13T08:43:53Z
@@ -423,6 +473,12 @@ test "Task.parse" {
         \\- a
         \\- b
         \\- c
+        \\custom_property:
+        \\- text
+        \\- random
+        \\data: test
+        \\Random line
+        \\Another random line
         \\---
         \\
         \\test description
@@ -433,7 +489,7 @@ test "Task.parse" {
     var task: Task = undefined;
     var diagnostic: ?Diagnostic = null;
     var reader = std.Io.Reader.fixed(data);
-    var memory: [4096]u8 = undefined;
+    var memory: [4096 * 2]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&memory);
     task.parse(&reader, &arena, &diagnostic) catch {
         std.debug.print("Diagnostic: {s}\n", .{diagnostic.?.message});
@@ -466,18 +522,14 @@ test "Task.parse" {
     defer std.testing.allocator.free(output);
 
     var writer = std.Io.Writer.fixed(output);
-    try writer.print("{f}", .{task});
+    writer.print("{f}", .{task}) catch {
+        std.debug.print("Data: \n{s}", .{output});
+        return error.TestFailedToWrite;
+    };
 
-    try std.testing.expectEqual(data.len, writer.buffered().len);
-    try std.testing.expectEqualStrings(data, writer.buffered());
+    try std.testing.expectEqual(expected_write.len, writer.buffered().len);
+    try std.testing.expectEqualStrings(expected_write, writer.buffered());
 
     var error_out: ?[]const u8 = null;
     try task.validate(&error_out);
-}
-
-test "Enum things" {
-    const test_enum = enum { a, e, f, g, b, c };
-    const varb: test_enum = undefined;
-    const vari: test_enum = undefined;
-    std.debug.print("var: {}, {}\n", .{ vari, varb });
 }

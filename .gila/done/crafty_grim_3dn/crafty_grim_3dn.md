@@ -1,10 +1,11 @@
 ---
 title: Make parser more robust, it will delete unknown properties
-status: todo
-priority: medium
+status: done
 priority_value: 50
+priority: medium
 owner: adiraj
 created: 2025-12-15T15:24:08Z
+completed: 2025-12-20T19:50:09Z
 ---
 
 This is probably going to be implemented by changing the parsing of task.zig to instead loop through properties

@@ -104,6 +104,7 @@ pub fn execute(self: Todo, arena: *stdx.Arena) void {
         .tags = if (self.tags) |tags| tags.tags else null,
         .waiting_on = if (self.waiting_on) |waiting_on| waiting_on.tasks else null,
         .completed = null,
+        .extra_lines = null,
     };
 
     var buffer: [4096]u8 = undefined;

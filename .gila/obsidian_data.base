@@ -29,12 +29,11 @@ views:
       - property: priority_value
         direction: ASC
     columnSize:
-      note.title: 424
-      note.status: 119
+      note.title: 560
       note.priority: 110
       note.priority_value: 82
       note.created: 178
-      note.completed: 212
+      note.status: 119
   - type: table
     name: Done Tasks
     filters:

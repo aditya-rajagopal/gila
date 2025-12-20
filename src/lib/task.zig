@@ -20,16 +20,16 @@ tags: ?[]const []const u8,
 description: []const u8,
 
 const default = Task{
-    .title = undefined,
+    .title = &.{},
     .status = undefined,
     .priority = undefined,
-    .priority_value = undefined,
-    .owner = undefined,
-    .created = undefined,
+    .priority_value = 0,
+    .owner = &.{},
+    .created = .default,
     .completed = null,
     .waiting_on = null,
     .tags = null,
-    .description = undefined,
+    .description = &.{},
 };
 
 inline fn Error(diagnostics: *?Diagnostic, message: []const u8, line: usize, column_start: usize, column_end: usize) error{Invalid} {
@@ -55,8 +55,8 @@ pub fn parse(
     arena: *stdx.Arena,
     diagnostics: *?Diagnostic,
 ) error{Invalid}!void {
-    // @TODO [[elliptical_ogre_78v]]
     self.* = default;
+
     const seperator = (reader.takeDelimiter('\n') catch return Error(diagnostics, "Insufficient data", 0, 0, 0)) orelse return Error(diagnostics, "Insufficient data", 0, 0, 0);
     if (!std.mem.eql(u8, seperator, gila.seperator)) return Error(diagnostics, "Task description file does not start with `" ++ gila.seperator ++ "`", 0, 0, 0);
 
@@ -64,7 +64,23 @@ pub fn parse(
     var line_number: usize = 0;
 
     const fields = @typeInfo(Task).@"struct".fields;
-    // var task: Task = undefined;
+
+    var counts = comptime blk: {
+        var count_fields = fields[0..fields.len].*;
+        for (&count_fields) |*field| {
+            field.type = u32;
+            field.alignment = @alignOf(u32);
+            field.default_value_ptr = @ptrCast(&@as(u32, 0));
+        }
+        break :blk @Type(.{
+            .@"struct" = .{
+                .layout = .auto,
+                .fields = &count_fields,
+                .decls = &.{},
+                .is_tuple = false,
+            },
+        }){};
+    };
     var finished_header = false;
     parsing_next_paramter: while (line) |l| {
         line_number += 1;
@@ -91,12 +107,25 @@ pub fn parse(
                 const current_line_number = line_number;
                 var diagnostic: ?Diagnostic = null;
                 @field(self, field.name) = parseValue(T, arena, &line, &line_number, &column, reader, &diagnostic) catch return error.Invalid;
+                @field(counts, field.name) += 1;
                 if (line_number > current_line_number) {
                     continue :parsing_next_paramter;
                 }
                 line = reader.takeDelimiter('\n') catch return Error(diagnostics, "Insufficient data", line_number, 0, 0);
                 continue :parsing_next_paramter;
             }
+        }
+    }
+
+    inline for (fields) |field| {
+        switch (@field(counts, field.name)) {
+            0 => if (@typeInfo(field.type) == .optional) {
+                @field(self, field.name) = null;
+            } else if (std.mem.eql(u8, field.name, "description")) {} else {
+                return Error(diagnostics, "Parameter `" ++ field.name ++ "` is missing", 0, 0, 0);
+            },
+            1 => {},
+            else => return Error(diagnostics, "Parameter `" ++ field.name ++ "` is not unique", 0, 0, 0),
         }
     }
     if (!finished_header) return Error(diagnostics, "Failed to find end of header", line_number, 0, 0);
@@ -130,7 +159,7 @@ fn parseValue(
         return std.meta.stringToEnum(T, l[column.*..]) orelse return Error(diagnostics, "Failed to parse parameter value as an enum of type " ++ @typeName(T), line_number.*, column.*, l.len);
     }
     if (T == []const []const u8) {
-        const start = arena.current;
+        const start = arena.currentPosition();
         if (l.len != column.*) return Error(diagnostics, "Unexpected data", line_number.*, column.*, l.len);
         line.* = reader.takeDelimiter('\n') catch return Error(diagnostics, "Insufficient data", line_number.*, column.*, column.*);
         var num_elements: usize = 0;
@@ -147,7 +176,7 @@ fn parseValue(
             }
         }
         if (num_elements == 0) return Error(diagnostics, "Failed to find any elements in field for a list parameter in header", line_number.*, column.*, column.*);
-        var lines = arena.memory[start..arena.current];
+        var lines = arena.memory[start..arena.currentPosition()];
         const elements = arena.pushArray([]const u8, num_elements);
         for (0..num_elements) |index| {
             lines = lines[2..];
@@ -313,7 +342,6 @@ pub fn transition(self: *Task, to: gila.Status) error{Invalid}!void {
 }
 
 pub fn validate(self: *Task, error_out: *?[]const u8) error{Invalid}!void {
-    // @TODO [[weak_spark_74s]]
     if (self.title.len == 0) {
         error_out.* = "Task title cannot be empty";
         return error.Invalid;
@@ -322,6 +350,59 @@ pub fn validate(self: *Task, error_out: *?[]const u8) error{Invalid}!void {
     if (self.owner.len == 0) {
         error_out.* = "Task owner cannot be empty";
         return error.Invalid;
+    }
+
+    if (self.tags) |tags| {
+        if (tags.len == 0) {
+            error_out.* = "Task tags cannot be empty";
+            return error.Invalid;
+        }
+        for (tags) |tag| {
+            if (tag.len == 0) {
+                error_out.* = "Task tag cannot be empty";
+                return error.Invalid;
+            }
+
+            const invalid_characters = std.mem.indexOfAny(u8, tag, "\r\n");
+            if (invalid_characters != null) {
+                error_out.* = "Task tag cannot contain '\\r' or '\\n'";
+                return error.Invalid;
+            }
+        }
+    }
+
+    if (self.waiting_on) |waiting_on| {
+        if (waiting_on.len == 0) {
+            error_out.* = "Task waiting_on cannot be empty";
+            return error.Invalid;
+        }
+        for (waiting_on) |waiting_on_item| {
+            if (waiting_on_item.len == 0) {
+                error_out.* = "Task waiting_on item cannot be empty";
+                return error.Invalid;
+            }
+            const task_start = (std.mem.find(u8, waiting_on_item, "\"[[") orelse {
+                error_out.* = "Task waiting_on item must start with \"[[\"";
+                return error.Invalid;
+            }) + 3;
+            const task_end = std.mem.indexOf(u8, waiting_on_item, "]]\"") orelse {
+                error_out.* = "Task waiting_on item must end with \"]]\"";
+                return error.Invalid;
+            };
+            if (task_end <= task_start) {
+                error_out.* = "Task waiting_on item must contain a valid task id";
+                return error.Invalid;
+            }
+            if (!gila.id.isValid(waiting_on_item[task_start..task_end])) {
+                error_out.* = "Task must be a valid task id";
+                return error.Invalid;
+            }
+            const invalid_characters = std.mem.indexOfAny(u8, waiting_on_item, "\r\n");
+            if (invalid_characters != null) {
+                error_out.* = "Task waiting_on item cannot contain '\\r' or '\\n'";
+                return error.Invalid;
+            }
+        }
     }
 }
 
@@ -355,6 +436,7 @@ test "Task.parse" {
     var memory: [4096]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&memory);
     task.parse(&reader, &arena, &diagnostic) catch {
+        std.debug.print("Diagnostic: {s}\n", .{diagnostic.?.message});
         return error.TestFailedToParse;
     };
     if (task.tags) |tags| {
@@ -391,4 +473,11 @@ test "Task.parse" {
 
     var error_out: ?[]const u8 = null;
     try task.validate(&error_out);
+}
+
+test "Enum things" {
+    const test_enum = enum { a, e, f, g, b, c };
+    const varb: test_enum = undefined;
+    const vari: test_enum = undefined;
+    std.debug.print("var: {}, {}\n", .{ vari, varb });
 }

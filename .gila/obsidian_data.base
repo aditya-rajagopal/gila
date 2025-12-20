@@ -2,19 +2,19 @@ formulas:
   "": ""
 views:
   - type: table
-    name: Table
+    name: TODO
     filters:
       and:
         - file.hasProperty("title")
+        - status != "done"
     order:
       - file.name
       - title
-      - status
       - priority
       - priority_value
       - created
-      - completed
       - tags
+      - status
     sort:
       - property: status
         direction: DESC
@@ -32,6 +32,21 @@ views:
       note.title: 424
       note.status: 119
       note.priority: 110
-      note.priority_value: 52
+      note.priority_value: 82
       note.created: 178
+      note.completed: 212
+  - type: table
+    name: Done Tasks
+    filters:
+      and:
+        - file.hasProperty("status")
+        - status == "done"
+    order:
+      - file.name
+      - title
+      - tags
+      - completed
+    columnSize:
+      note.title: 424
+      note.tags: 268
       note.completed: 212

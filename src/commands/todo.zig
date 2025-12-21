@@ -50,7 +50,8 @@ pub const help =
     \\        The tags of the task. Should not contain any of '\n', '\r', '\t'.
     \\
     \\    --waiting-on="<task1>,<task2>,..."
-    \\        The tasks that this task depends on. Each task should be a valid task_id of the form `word_word_ccc'
+    \\        The tasks that this task depends on. Each task should be a valid task_id of the form `word_word_ccc'.
+    \\        If this is provided the task will be created as a waiting task.
     \\
     \\    --verbose 
     \\        Run verbosely. Prints the contents of the task description file to stdout.

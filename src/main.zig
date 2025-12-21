@@ -77,7 +77,8 @@ const CLIArgs = union(enum) {
         \\    gila init [-h | --help] [--bare] [<directory>]
         \\
         \\    gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>] 
-        \\              [--description=<description>] [--tags="<tag1>,<tag2>,..."] [--verbose] 
+        \\              [--description=<description>] [--tags="<tag1>,<tag2>,..."] 
+        \\              [--waiting-on="<task1>,<task2>,..."] [--verbose]
         \\              [--edit] <title>
         \\
         \\    gila done [-h | --help] [--verbose] [--edit] <task_id>

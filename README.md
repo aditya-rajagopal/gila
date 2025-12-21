@@ -16,22 +16,43 @@ Heavily inspired by the task system used by [Tsoding](https://www.youtube.com/@T
 
 You'll need [Zig](https://ziglang.org/download/) installed.
 
-1.  **Build it:**
+1.  It is recommended to use `ReleaseSafe` when building for actual use. ReleaseFast is mostly unneccessary for most use cases and loses some protections.
     ```bash
     zig build -Doptimize=ReleaseSafe
     ```
-2.  **Run it:**
-    Add `zig-out/bin` to your PATH, or just run:
+2.  Add the `zig-out/bin` folder to your PATH, or just run:
     ```bash
     ./zig-out/bin/gila --help
     ```
+**Start a project:**
+```bash
+gila init
+```
+
+**Create a task**
+```bash
+# Basic
+gila todo "Fix the memory leak in the renderer"
+
+# More customizable and opens the file in your editor at $EDITOR or vim by default
+gila todo --priority=high --priority-value=80 --tags="bug,renderer" --edit "Fix the memory leak"
+# > New task created: scared_nimbus_5kw
+```
+
+**Finish the task**
+```bash
+# Marks the task as done and opens the editor at $EDITOR or vim by default
+gila done --edit scared_nimbus_5kw
+```
+
+**OR** modify the task in an editor and run `gila sync` to sync the changes.
 
 ## Why?
 
 I often have `TODO` comments littered throughout
 my codebase and I dont like it. It is easy to forget and hard to track. I also dislike tools like JIRA and Github issues for creating tasks as I usually just want
 some place to add information like images, debug logs, and thoughts for me to reference later. Lastly I value being able to 
-locally view all my tasks and check them in when I sync my repositories across multiple machines.
+locally view all my tasks and check them in when I sync my repositories across multiple machines. So i made this and:
 
 * The tasks live where your code lives. Syncing your repo syncs your tasks.
 * Each task is just a Markdown file with simple frontmatter. Readable everywhere.
@@ -110,9 +131,12 @@ Here is how you drive the lizard:
 gila [-h | --help]
 gila version
 gila init [-h | --help] [--bare] [<directory>]
-gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>;] \
-          [--description=<description>;] [--tags="<tag1>,<tag2>,..."] [--verbose] \
+
+gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>] 
+          [--description=<description>] [--tags="<tag1>,<tag2>,..."] 
+          [--waiting-on="<task1>,<task2>,..."] [--verbose]
           [--edit] <title>
+
 gila done [-h | --help] [--verbose] [--edit] <task_id>
 gila sync [-h | --help] [--verbose]
 ```
@@ -125,25 +149,3 @@ gila sync [-h | --help] [--verbose]
 | `gila sync` | Synchrnoize tasks when you modify them manually |
 | `gila version` | Prints the version |
 
-### Examples
-
-**Start a project:**
-```bash
-gila init
-```
-
-**Create a task**
-```bash
-# Basic
-gila todo "Fix the memory leak in the renderer"
-
-# More customizable and opens the file in your editor at $EDITOR or vim by default
-gila todo --priority=high --priority-value=80 --tags="bug,renderer" --edit "Fix the memory leak"
-# > New task created: scared_nimbus_5kw
-```
-
-**Finish the task**
-```bash
-# Marks the task as done and opens the editor at $EDITOR or vim by default
-gila done --edit scared_nimbus_5kw
-```

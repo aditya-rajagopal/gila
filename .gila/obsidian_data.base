@@ -15,6 +15,7 @@ views:
       - tags
       - status
       - created
+      - waiting_on
     sort:
       - property: status
         direction: DESC

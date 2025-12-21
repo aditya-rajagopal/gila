@@ -32,14 +32,17 @@ pub const help =
     \\
 ;
 
-const Maps = struct {
-    todo: ?std.StringArrayHashMapUnmanaged(void),
-    started: ?std.StringArrayHashMapUnmanaged(void),
-    waiting: ?std.StringArrayHashMapUnmanaged(void),
-    done: ?std.StringArrayHashMapUnmanaged(void),
-    cancelled: ?std.StringArrayHashMapUnmanaged(void),
+const TaskSet = std.StringArrayHashMapUnmanaged(void);
+const Transitions = std.StringArrayHashMapUnmanaged([2]gila.Status);
 
-    pub const empty = Maps{
+const TaskSets = struct {
+    todo: ?TaskSet,
+    started: ?TaskSet,
+    waiting: ?TaskSet,
+    done: ?TaskSet,
+    cancelled: ?TaskSet,
+
+    pub const empty = TaskSets{
         .todo = null,
         .started = null,
         .waiting = null,
@@ -49,6 +52,7 @@ const Maps = struct {
 };
 
 pub fn execute(self: Sync, arena: *stdx.Arena) void {
+    // @TODO [[massive_raid_664]]
     const allocator = arena.allocator();
     if (!self.verbose) {
         root.log_level = .warn;
@@ -60,13 +64,13 @@ pub fn execute(self: Sync, arena: *stdx.Arena) void {
     const fixed_buffer: []u8 = allocator.alloc(u8, 128 * 1024) catch unreachable;
     var local_arena = stdx.Arena.initBuffer(fixed_buffer);
 
-    var maps: Maps = .empty;
-    var transitions = std.StringArrayHashMapUnmanaged([2]gila.Status).empty;
+    var maps: TaskSets = .empty;
+    var transitions: Transitions = .empty;
 
-    inline for (@typeInfo(Maps).@"struct".fields) |field| {
+    inline for (@typeInfo(TaskSets).@"struct".fields) |field| {
         var dir_n: ?std.fs.Dir = gila_dir.openDir(field.name, .{ .iterate = true }) catch null;
         if (dir_n) |*dir| {
-            var map = std.StringArrayHashMapUnmanaged(void).init(allocator, &.{}, &.{}) catch unreachable;
+            var map = TaskSet.init(allocator, &.{}, &.{}) catch unreachable;
             defer dir.close();
             var dir_walker = dir.iterateAssumeFirstIteration();
             while (dir_walker.next() catch |err| {
@@ -90,96 +94,46 @@ pub fn execute(self: Sync, arena: *stdx.Arena) void {
     }
 
     if (maps.done) |*done_map| {
-        var dir: std.fs.Dir = gila_dir.openDir("done", .{}) catch {
-            @branchHint(.cold);
-            log.err("Unexpected error while opening done directory", .{});
-            return;
-        };
-        defer dir.close();
-        var index: usize = 0;
-        while (index < done_map.keys().len) {
-            const task_name = done_map.keys()[index];
-            defer local_arena.reset(false);
-            var buffer: [128]u8 = undefined;
-            const file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{task_name}) catch unreachable;
-            const path = std.fs.path.join(local_arena.allocator(), &.{ task_name, file_name }) catch unreachable;
-            const file = dir.openFile(path, .{}) catch |err| {
-                log.err("Unexpected error while opening done file {s}: {s}", .{ task_name, @errorName(err) });
-                index += 1;
-                continue;
-            };
-            var reader_buffer: [4096]u8 = undefined;
-            defer file.close();
-            var reader = file.reader(&reader_buffer);
-            reader.interface.fillMore() catch {
-                log.err("Failed to read task description file {s}", .{task_name});
-                index += 1;
-                continue;
-            };
-            var diagnostic: ?gila.Task.Diagnostic = null;
-            var task: gila.Task = .default;
-            task.parse(&reader.interface, &local_arena, &diagnostic) catch {
-                log.err("Failed to parse task description file {s}: {s}", .{ task_name, diagnostic.?.message });
-                index += 1;
-                continue;
-            };
-            var error_out: ?[]const u8 = null;
-            task.validate(&error_out) catch {
-                log.err("Failed to validate task description file {s}: {s}", .{ task_name, error_out.? });
-                index += 1;
-                continue;
-            };
-            if (task.status == .done) {
-                index += 1;
-            } else {
-                const result = moveTask(&local_arena, file_name, &task, gila.Status.done, task.status, gila_dir);
-                switch (result) {
-                    .err => {
-                        index += 1;
-                    },
-                    .moved => |to_state| {
-                        switch (to_state) {
-                            .done => unreachable,
-                            inline else => |s| {
-                                if (@field(maps, @tagName(s))) |*map| {
-                                    map.put(arena.allocator(), task_name, {}) catch unreachable;
-                                } else {
-                                    var map = std.StringArrayHashMapUnmanaged(void).init(arena.allocator(), &.{}, &.{}) catch unreachable;
-                                    map.put(arena.allocator(), task_name, {}) catch unreachable;
-                                    @field(maps, @tagName(s)) = map;
-                                }
-                                _ = done_map.swapRemove(task_name);
-                                transitions.put(arena.allocator(), task_name, [_]gila.Status{ .done, s }) catch unreachable;
-                            },
-                        }
-                    },
-                }
-            }
-        }
+        parseFolder(gila_dir, gila.Status.done, &local_arena, &maps, done_map, arena, &transitions) catch return;
     }
 
     if (maps.todo) |*todo_map| {
-        var dir: std.fs.Dir = gila_dir.openDir("todo", .{}) catch {
+        parseFolder(gila_dir, gila.Status.todo, &local_arena, &maps, todo_map, arena, &transitions) catch return;
+    }
+
+    if (maps.started) |*started_map| {
+        parseFolder(gila_dir, gila.Status.started, &local_arena, &maps, started_map, arena, &transitions) catch return;
+    }
+
+    if (maps.cancelled) |*cancelled_map| {
+        parseFolder(gila_dir, gila.Status.cancelled, &local_arena, &maps, cancelled_map, arena, &transitions) catch return;
+    }
+
+    if (maps.waiting) |*waiting_map| {
+        var dir: std.fs.Dir = gila_dir.openDir("waiting", .{}) catch {
             @branchHint(.cold);
-            log.err("Unexpected error while opening done directory", .{});
+            log.err("Unexpected error while opening 'waiting' directory", .{});
             return;
         };
         defer dir.close();
         var index: usize = 0;
-        while (index < todo_map.keys().len) {
-            const task_name = todo_map.keys()[index];
+        while (index < waiting_map.keys().len) {
             defer local_arena.reset(false);
+            const task_name = waiting_map.keys()[index];
+
             var buffer: [128]u8 = undefined;
             const file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{task_name}) catch unreachable;
             const path = std.fs.path.join(local_arena.allocator(), &.{ task_name, file_name }) catch unreachable;
-            const file = dir.openFile(path, .{}) catch |err| {
+            const file = dir.openFile(path, .{ .mode = .read_write }) catch |err| {
                 log.err("Unexpected error while opening todo file {s}: {s}", .{ task_name, @errorName(err) });
                 index += 1;
                 continue;
             };
+
             var reader_buffer: [4096]u8 = undefined;
             defer file.close();
             var reader = file.reader(&reader_buffer);
+
             reader.interface.fillMore() catch {
                 log.err("Failed to read task description file {s}", .{task_name});
                 index += 1;
@@ -192,35 +146,115 @@ pub fn execute(self: Sync, arena: *stdx.Arena) void {
                 index += 1;
                 continue;
             };
+
             var error_out: ?[]const u8 = null;
-            task.validate(&error_out) catch {
-                log.err("Failed to validate task description file {s}: {s}", .{ task_name, error_out.? });
-                index += 1;
-                continue;
+            task.validate(&error_out) catch |err| switch (err) {
+                error.Invalid => {
+                    log.err("Failed to validate task description file {s}: {s}", .{ task_name, error_out.? });
+                    index += 1;
+                    continue;
+                },
+                error.WaitingFoundButAllValid => {
+                    task.transition(.waiting) catch unreachable;
+                    log.info("Task '{s}' found in '{s}' folder and marked as '{s}' status had a waiting_on list. Transitioning back to 'waiting' status", .{ task_name, @tagName(.waiting), @tagName(task.status) });
+                },
+                else => {},
             };
-            if (task.status == .todo) {
-                index += 1;
-            } else {
-                const result = moveTask(&local_arena, file_name, &task, gila.Status.todo, task.status, gila_dir);
-                switch (result) {
-                    .err => {
-                        index += 1;
-                    },
-                    .moved => |to_state| switch (to_state) {
-                        .todo => unreachable,
-                        inline else => |s| {
-                            if (@field(maps, @tagName(s))) |*map| {
-                                map.put(arena.allocator(), task_name, {}) catch unreachable;
-                            } else {
-                                var map = std.StringArrayHashMapUnmanaged(void).init(arena.allocator(), &.{}, &.{}) catch unreachable;
-                                map.put(arena.allocator(), task_name, {}) catch unreachable;
-                                @field(maps, @tagName(s)) = map;
+
+            if (task.waiting_on) |waiting_on| {
+                var new_array = std.ArrayList([]const u8).initCapacity(local_arena.allocator(), waiting_on.len) catch unreachable;
+                for (waiting_on) |name| {
+                    const waiting_task = name[3 .. name.len - 3];
+                    var found: bool = false;
+                    var done: bool = false;
+                    inline for (@typeInfo(TaskSets).@"struct".fields) |field| {
+                        if (comptime std.mem.eql(u8, field.name, "waiting")) {
+                            continue;
+                        }
+
+                        if (@field(maps, field.name)) |map| {
+                            const exists = if (map.get(waiting_task)) |_| true else false;
+                            found = found or exists;
+                            if (comptime std.mem.eql(u8, field.name, "done") or std.mem.eql(u8, field.name, "cancelled")) {
+                                done = done or exists;
                             }
-                            _ = todo_map.swapRemove(task_name);
-                            transitions.put(arena.allocator(), task_name, [_]gila.Status{ .todo, s }) catch unreachable;
-                        },
-                    },
+                        }
+                    }
+                    if (!found) {
+                        log.warn("Task '{s}' is waiting on '{s}' but it does not exist in the gila project", .{ task_name, waiting_task });
+                    } else {
+                        if (done) {
+                            log.info("Task '{s}' is waiting on '{s}' but it is done or cancelled. Removing from waiting list", .{ task_name, waiting_task });
+                        } else {
+                            new_array.appendAssumeCapacity(name);
+                        }
+                    }
                 }
+
+                if (new_array.items.len == 0) {
+                    task.waiting_on = null;
+                } else if (new_array.items.len != waiting_on.len) {
+                    task.waiting_on = new_array.toOwnedSlice(local_arena.allocator()) catch unreachable;
+                    file.setEndPos(0) catch |err| {
+                        log.err("Failed to set end position of done file {s}: {s}", .{ file_name, @errorName(err) });
+                        return;
+                    };
+
+                    var write_buffer: [4096]u8 align(16) = undefined;
+                    var file_writer = file.writer(&write_buffer);
+                    const writer = &file_writer.interface;
+
+                    writer.print("{f}", .{task}) catch |err| {
+                        log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
+                        return;
+                    };
+                    // @IMPORTANT I never forget to flush
+                    writer.flush() catch |err| {
+                        log.err("Failed to flush {s}.md: {s}", .{ task_name, @errorName(err) });
+                        return;
+                    };
+                    file.sync() catch |err| {
+                        log.err("Failed to sync {s}.md: {s}", .{ task_name, @errorName(err) });
+                        return;
+                    };
+                    index += 1;
+                    continue;
+                } else {
+                    // NOTE All waiting tasks are still undone
+                    index += 1;
+                    continue;
+                }
+            }
+
+            log.info("Task {s} is not waiting on anything", .{task_name});
+            const target_status = switch (task.status) {
+                .todo, .started => |s| if (task.completed) |_| .done else s,
+                .done, .cancelled => |s| if (task.completed) |_| s else .todo,
+                .waiting => .todo,
+            };
+            const result = moveTask(&local_arena, file_name, &task, .waiting, target_status, gila_dir);
+            switch (result) {
+                .err => {
+                    index += 1;
+                    continue;
+                },
+                .moved => |to_state| switch (to_state) {
+                    inline else => |s| {
+                        if (task.status != .waiting) {
+                            if (@field(maps, @tagName(s))) |*m| {
+                                m.put(arena.allocator(), task_name, {}) catch unreachable;
+                            } else {
+                                var m = TaskSet.init(arena.allocator(), &.{}, &.{}) catch unreachable;
+                                m.put(arena.allocator(), task_name, {}) catch unreachable;
+                                @field(maps, @tagName(s)) = m;
+                            }
+                            _ = waiting_map.swapRemove(task_name);
+                        } else {
+                            index += 1;
+                        }
+                        transitions.put(arena.allocator(), task_name, [_]gila.Status{ .waiting, s }) catch unreachable;
+                    },
+                },
             }
         }
     }
@@ -232,6 +266,103 @@ pub fn execute(self: Sync, arena: *stdx.Arena) void {
         writer.interface.print("Moved {s}: {t} -> {t}\n", .{ entry.key_ptr.*, entry.value_ptr[0], entry.value_ptr[1] }) catch unreachable;
     }
     writer.interface.flush() catch unreachable;
+}
+
+fn parseFolder(
+    gila_dir: std.fs.Dir,
+    folder: gila.Status,
+    local_arena: *stdx.Arena,
+    sets: *TaskSets,
+    set: *TaskSet,
+    arena: *stdx.Arena,
+    transitions: *Transitions,
+) !void {
+    var dir: std.fs.Dir = gila_dir.openDir(@tagName(folder), .{}) catch {
+        @branchHint(.cold);
+        log.err("Unexpected error while opening '{s}' directory", .{@tagName(folder)});
+        return;
+    };
+    defer dir.close();
+    var index: usize = 0;
+    while (index < set.keys().len) {
+        const task_name = set.keys()[index];
+        defer local_arena.reset(false);
+        var buffer: [128]u8 = undefined;
+        const file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{task_name}) catch unreachable;
+        const path = std.fs.path.join(local_arena.allocator(), &.{ task_name, file_name }) catch unreachable;
+        const file = dir.openFile(path, .{}) catch |err| {
+            log.err("Unexpected error while opening task file {s}: {s}", .{ task_name, @errorName(err) });
+            index += 1;
+            continue;
+        };
+        var reader_buffer: [4096]u8 = undefined;
+        defer file.close();
+        var reader = file.reader(&reader_buffer);
+        reader.interface.fillMore() catch {
+            log.err("Failed to read task description file {s}", .{task_name});
+            index += 1;
+            continue;
+        };
+        var diagnostic: ?gila.Task.Diagnostic = null;
+        var task: gila.Task = .default;
+        task.parse(&reader.interface, local_arena, &diagnostic) catch {
+            log.err("Failed to parse task description file {s}: {s}", .{ task_name, diagnostic.?.message });
+            index += 1;
+            continue;
+        };
+        var error_out: ?[]const u8 = null;
+        var changed: bool = false;
+        task.validate(&error_out) catch |err| switch (err) {
+            error.Invalid => {
+                log.err("Failed to validate task description file {s}: {s}", .{ task_name, error_out.? });
+                index += 1;
+                continue;
+            },
+            error.WaitingFoundButAllValid => {
+                task.transition(.waiting) catch {
+                    log.err("Invalid task '{s}' with 'waiting' status: Skipping", .{task_name});
+                    index += 1;
+                    continue;
+                };
+                log.info("Task '{s}' found in '{s}' folder and marked as '{s}' status had a waiting_on list. Transitioning to 'waiting' status", .{ task_name, @tagName(folder), @tagName(task.status) });
+                changed = true;
+            },
+            error.WaitingNotFoundWhenWaitingStatus => {
+                log.err("Invalid task '{s}' had 'waiting' status but no waiting_on list: Reverting to '{s}' status", .{ task_name, @tagName(folder) });
+                task.transition(folder) catch {
+                    log.err("Failed to revert task '{s}' to '{s}' status", .{ task_name, @tagName(folder) });
+                    index += 1;
+                    continue;
+                };
+                changed = true;
+            },
+            else => {},
+        };
+        if (task.status == folder and !changed) {
+            index += 1;
+        } else {
+            const result = moveTask(local_arena, file_name, &task, folder, task.status, gila_dir);
+            switch (result) {
+                .err => {
+                    index += 1;
+                },
+                .moved => |to_state| switch (to_state) {
+                    .todo => unreachable,
+                    inline else => |s| {
+                        if (@field(sets, @tagName(s))) |*m| {
+                            m.put(arena.allocator(), task_name, {}) catch unreachable;
+                        } else {
+                            var m = TaskSet.init(arena.allocator(), &.{}, &.{}) catch unreachable;
+                            m.put(arena.allocator(), task_name, {}) catch unreachable;
+                            @field(sets, @tagName(s)) = m;
+                        }
+                        _ = set.swapRemove(task_name);
+                        transitions.put(arena.allocator(), task_name, [_]gila.Status{ folder, s }) catch unreachable;
+                    },
+                },
+            }
+        }
+    }
 }
 
 const Result = union(enum) {
@@ -254,7 +385,11 @@ fn moveTask(
     );
     task.transition(to) catch {
         log.err("Failed to transition task '{s}' to '{s}'", .{ task_name, @tagName(to) });
-        return .err;
+        task.status = from;
+        task.transition(task.status) catch {
+            log.err("Failed to transition task '{s}' to '{s}'", .{ task_name, @tagName(task.status) });
+            return .err;
+        };
     };
 
     common.moveTaskData(arena.allocator(), gila_dir, task_name, from, to) catch return .err;

@@ -331,40 +331,70 @@ pub fn find(gpa: std.mem.Allocator, task_name: []const u8, gila_dir: std.fs.Dir)
 pub fn transition(self: *Task, to: gila.Status) error{Invalid}!void {
     const status = self.status;
     switch (to) {
-        .todo => {
-            switch (status) {
-                .todo => {
-                    if (self.completed != null) {
-                        log.info("Task '{s}' is in todo state with a completed date and time. Removing it", .{self.title});
-                        self.completed = null;
-                    }
-                },
-                .done => {
-                    // NOTE: todo and done have the same length so this is safe
-                    self.status = .todo;
-                    self.completed = null;
-                },
-                else => @panic("Not implemented"),
+        .waiting => {
+            if (self.waiting_on == null) {
+                log.err("Task '{s}' is in waiting state but has no waiting_on list", .{self.title});
+                return error.Invalid;
             }
+            self.completed = null;
+            self.status = .waiting;
         },
-        .done => {
+        .started => {
+            if (self.waiting_on != null) {
+                log.err("Task '{s}' is in started state but has a waiting_on list", .{self.title});
+                return error.Invalid;
+            }
+            self.status = .started;
+            self.completed = null;
+        },
+        .cancelled => {
+            if (self.waiting_on != null) {
+                log.err("Task '{s}' is in cancelled state but has a waiting_on list", .{self.title});
+                return error.Invalid;
+            }
             switch (status) {
-                .todo => {
-                    self.status = .done;
+                else => self.status = .cancelled,
+                .done => {
+                    log.err("Task '{s}' is in the done state but wants to moe to cancelled. This is strange", .{self.title});
+                    return error.Invalid;
                 },
-                .done => {},
-                else => @panic("Not implemented"),
             }
             if (self.completed) |_| {
                 return;
             }
             self.completed = stdx.DateTimeUTC.now();
         },
-        else => @panic("Not implemented"),
+        .todo => {
+            if (self.waiting_on != null) {
+                log.err("Task '{s}' is in todo state but has a waiting_on list", .{self.title});
+                return error.Invalid;
+            }
+            self.status = .todo;
+            self.completed = null;
+        },
+        .done => {
+            log.err("Transitioning task '{s}' to done status", .{self.title});
+            if (self.waiting_on != null) {
+                log.err("Task '{s}' is in done state but has a waiting_on list", .{self.title});
+                return error.Invalid;
+            }
+            self.status = .done;
+            if (self.completed) |_| {
+                return;
+            }
+            self.completed = stdx.DateTimeUTC.now();
+        },
     }
 }
 
-pub fn validate(self: *const Task, error_out: *?[]const u8) error{Invalid}!void {
+pub const ValidateError = error{
+    Invalid,
+    WaitingFoundButAllValid,
+    WaitingNotFoundWhenWaitingStatus,
+    CompletedFoundWhenNotCompletedStatus,
+    CompletedNotFoundWhenCompletedStatus,
+};
+pub fn validate(self: *const Task, error_out: *?[]const u8) ValidateError!void {
     if (self.title.len == 0) {
         error_out.* = "Task title cannot be empty";
         return error.Invalid;
@@ -426,6 +456,24 @@ pub fn validate(self: *const Task, error_out: *?[]const u8) error{Invalid}!void 
                 return error.Invalid;
             }
         }
+        if (self.status != .waiting) {
+            return error.WaitingFoundButAllValid;
+        }
+    }
+
+    switch (self.status) {
+        .todo, .started => if (self.completed != null) {
+            error_out.* = "Task cannot be in todo or started state with a completed date";
+            return error.CompletedFoundWhenNotCompletedStatus;
+        },
+        .done, .cancelled => if (self.completed == null) {
+            error_out.* = "Task cannot be in done or cancelled state without a completed date";
+            return error.CompletedNotFoundWhenCompletedStatus;
+        },
+        .waiting => if (self.waiting_on == null) {
+            error_out.* = "Task cannot be in waiting state without a waiting_on list";
+            return error.WaitingNotFoundWhenWaitingStatus;
+        },
     }
 }
 

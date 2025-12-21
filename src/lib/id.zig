@@ -23,7 +23,6 @@ pub fn new(gpa: std.mem.Allocator) ![]u8 {
 }
 
 pub fn isValid(id: []const u8) bool {
-    log.debug("Validating task_id '{s}'", .{id});
     const num_underscores = std.mem.count(u8, id, "_");
     if (num_underscores != 2) {
         log.err("Expected task_id of the form word_word_ccc. Found '{s}' with only {d} underscores", .{ id, num_underscores });
@@ -46,7 +45,6 @@ pub fn isValid(id: []const u8) bool {
             return false;
         }
     }
-    log.debug("Task_id '{s}' is valid", .{id});
     return true;
 }
 

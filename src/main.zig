@@ -21,6 +21,36 @@ pub var log_level: std.log.Level = switch (builtin.mode) {
     else => std.log.Level.info,
 };
 
+// pub fn logFn(
+//     comptime level: std.log.Level,
+//     comptime scope: @EnumLiteral(),
+//     comptime format: []const u8,
+//     args: anytype,
+// ) void {
+//     if (@intFromEnum(level) > @intFromEnum(log_level)) return;
+//     const level_text = comptime blk: {
+//         const text: []const u8 = level.asText();
+//         var result: []const u8 = &.{};
+//         for (text) |*c| {
+//             result = result ++ &[_]u8{std.ascii.toUpper(c.*)};
+//         }
+//         break :blk result;
+//     };
+//     const scope_prefix = "(" ++ @tagName(scope) ++ "): ";
+//     // const date_time = DateTimeUTC.now();
+//
+//     var stderr_writer = std.fs.File.stderr().writer(&.{});
+//     const writer = &stderr_writer.interface;
+//     std.debug.lockStdErr();
+//
+//     nosuspend {
+//         // date_time.format("", .{}, writer) catch return;
+//         // " " ++
+//         writer.print(level_text ++ scope_prefix ++ format ++ "\n", args) catch return;
+//     }
+//     std.debug.unlockStdErr();
+// }
+
 pub fn logFn(
     comptime level: std.log.Level,
     comptime scope: @EnumLiteral(),
@@ -37,27 +67,27 @@ pub fn logFn(
         break :blk result;
     };
     const scope_prefix = "(" ++ @tagName(scope) ++ "): ";
-    // const date_time = DateTimeUTC.now();
 
-    const writer = if (level != .err) blk: {
-        var stdout_writer = std.fs.File.stdout().writer(&.{});
-        const stdout = &stdout_writer.interface;
-        break :blk stdout;
-    } else blk: {
-        var stderr_writer = std.fs.File.stderr().writer(&.{});
-        const stderr = &stderr_writer.interface;
-        std.debug.lockStdErr();
-        break :blk stderr;
-    };
-
-    nosuspend {
-        // date_time.format("", .{}, writer) catch return;
-        // " " ++
-        writer.print(level_text ++ scope_prefix ++ format ++ "\n", args) catch return;
+    var buffer: [128]u8 = undefined;
+    const stderr, const ttyconf = std.debug.lockStderrWriter(&buffer);
+    defer std.debug.unlockStderrWriter();
+    ttyconf.setColor(stderr, switch (level) {
+        .err => .red,
+        .warn => .yellow,
+        .info => .green,
+        .debug => .magenta,
+    }) catch {};
+    ttyconf.setColor(stderr, .bold) catch {};
+    ttyconf.setColor(stderr, .bold) catch {};
+    stderr.writeAll(level_text) catch return;
+    ttyconf.setColor(stderr, .reset) catch {};
+    ttyconf.setColor(stderr, .dim) catch {};
+    ttyconf.setColor(stderr, .bold) catch {};
+    if (scope != .default) {
+        stderr.writeAll(scope_prefix) catch return;
     }
-    if (level == .err) {
-        std.debug.unlockStdErr();
-    }
+    ttyconf.setColor(stderr, .reset) catch {};
+    stderr.print(format ++ "\n", args) catch return;
 }
 
 const CLIArgs = union(enum) {

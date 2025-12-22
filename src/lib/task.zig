@@ -8,6 +8,7 @@ const log = std.log.scoped(.gila);
 
 const Task = @This();
 
+id: []const u8,
 title: []const u8,
 status: gila.Status,
 priority_value: u8,
@@ -21,6 +22,7 @@ description: []const u8,
 extra_lines: ?[]const []const u8,
 
 pub const default = Task{
+    .id = &.{},
     .title = &.{},
     .status = undefined,
     .priority = undefined,
@@ -34,14 +36,14 @@ pub const default = Task{
     .extra_lines = null,
 };
 
-inline fn Error(diagnostics: *?Diagnostic, message: []const u8, line: usize, column_start: usize, column_end: usize) error{Invalid} {
-    diagnostics.* = .{
-        .line = line,
-        .column_start = column_start,
-        .column_end = column_end,
-        .message = message,
-    };
-    return error.Invalid;
+pub fn init(id: []const u8) error{Invalid}!Task {
+    if (!gila.id.isValid(id)) {
+        log.err("Invalid task_id `{s}` a task is of the form word_word_ccc", .{id});
+        return error.Invalid;
+    }
+    var task = default;
+    task.id = id;
+    return task;
 }
 
 pub const Diagnostic = struct {
@@ -51,14 +53,12 @@ pub const Diagnostic = struct {
     message: []const u8,
 };
 
-pub fn parse(
+pub fn fromReader(
     self: *Task,
     reader: *std.Io.Reader,
     arena: *stdx.Arena,
     diagnostics: *?Diagnostic,
 ) error{Invalid}!void {
-    self.* = default;
-
     const seperator = (reader.takeDelimiter('\n') catch return Error(diagnostics, "Insufficient data", 0, 0, 0)) orelse return Error(diagnostics, "Insufficient data", 0, 0, 0);
     if (!std.mem.eql(u8, seperator, gila.seperator)) return Error(diagnostics, "Task description file does not start with `" ++ gila.seperator ++ "`", 0, 0, 0);
 
@@ -70,7 +70,7 @@ pub fn parse(
     const fields = comptime blk: {
         var out: []const std.builtin.Type.StructField = &.{};
         for (@typeInfo(Task).@"struct".fields) |field| {
-            if (std.mem.eql(u8, field.name, "extra_lines") or std.mem.eql(u8, field.name, "description")) {
+            if (std.mem.eql(u8, field.name, "extra_lines") or std.mem.eql(u8, field.name, "description") or std.mem.eql(u8, field.name, "id")) {
                 continue;
             }
             out = out ++ &[_]std.builtin.Type.StructField{field};
@@ -78,21 +78,8 @@ pub fn parse(
         break :blk out;
     };
 
-    var counts = comptime blk: {
-        var count_fields = fields[0..fields.len].*;
-        var names: [count_fields.len][]const u8 = undefined;
-        var types: [count_fields.len]type = undefined;
-        var attributes: [count_fields.len]std.builtin.Type.StructField.Attributes = undefined;
-        for (&count_fields, 0..) |*field, i| {
-            names[i] = field.name;
-            types[i] = u32;
-            attributes[i] = .{
-                .@"align" = @alignOf(u32),
-                .default_value_ptr = @ptrCast(&@as(u32, 0)),
-            };
-        }
-        break :blk @Struct(.auto, null, names[0..], &types, &attributes){};
-    };
+    var counts = std.enums.EnumFieldStruct(std.meta.FieldEnum(Task), u32, 0){};
+
     var finished_header = false;
     parsing_next_paramter: while (line) |l| {
         line_number += 1;
@@ -193,10 +180,12 @@ fn parseValue(
         column.* = 0;
         while (line.*) |nl| {
             line_number.* += 1;
-            if (std.mem.startsWith(u8, nl, "- ")) {
-                if (nl.len < 3) return Error(diagnostics, "Insufficient data", line_number.*, column.*, column.*);
+            var i: usize = 0;
+            while (nl[i] == ' ' or nl[i] == '\t') : (i += 1) {}
+            if (std.mem.startsWith(u8, nl[i..], "- ")) {
+                if (nl[i..].len < 3) return Error(diagnostics, "Insufficient data", line_number.*, column.*, column.*);
                 num_elements += 1;
-                _ = arena.pushString(nl);
+                _ = arena.pushString(nl[i..]);
                 line.* = reader.takeDelimiter('\n') catch return Error(diagnostics, "Buffer too small for line or read failed", line_number.*, column.*, column.*);
             } else {
                 break;
@@ -215,11 +204,174 @@ fn parseValue(
     }
 }
 
+pub const FindAndReadResult = struct {
+    task: Task,
+    status: gila.Status,
+};
+/// Returns the folder status of the task. The slices in task point to a buffer allocated on the arena.
+/// It is expected that the arena lifetime is atleast as long as you want the Task to exist.
+pub fn findTaskAndRead(id: []const u8, io: std.Io, arena: *stdx.Arena, gila_dir: std.fs.Dir) error{Failed}!FindAndReadResult {
+    var task = Task.init(id) catch {
+        log.err("Invalid task_id `{s}` a task is of the form word_word_ccc", .{id});
+        return error.Failed;
+    };
+
+    var result = getTaskFile(task.id, arena, gila_dir) catch |err| switch (err) {
+        error.TaskNotFound => {
+            log.err("Task {s} does not exist in gila directory", .{task.id});
+            return error.Failed;
+        },
+        else => |e| {
+            log.err("Failed to open task {s}: {s}", .{ task.id, @errorName(e) });
+            return error.Failed;
+        },
+    };
+    defer result.fd.close();
+
+    try task.fromFile(result.fd, io, arena);
+
+    if (result.folder != task.status) {
+        log.warn(
+            "Task '{s}' was found in the '{s}' folder but was marked as '{s}' in the description. The description file wins",
+            .{ task.id, @tagName(result.folder), @tagName(task.status) },
+        );
+    }
+
+    return .{ .task = task, .status = result.folder };
+}
+
+pub fn fromFile(self: *Task, task_file: std.fs.File, io: std.Io, arena: *stdx.Arena) error{Failed}!void {
+    var buffer: [4096]u8 = undefined;
+    var reader = task_file.reader(io, &buffer);
+    reader.interface.fillMore() catch {
+        log.err("Failed to read task description file {s}", .{self.id});
+        return error.Failed;
+    };
+
+    var diagnostic: ?Diagnostic = null;
+    self.fromReader(&reader.interface, arena, &diagnostic) catch {
+        log.err("Failed to parse task description file {s}: {s}", .{ self.id, diagnostic.?.message });
+        return error.Failed;
+    };
+    log.info("Successfully parsed task {s}", .{self.id});
+}
+
+const FindError = error{TaskNotFound} || std.Io.File.OpenError;
+pub const FindResult = struct {
+    fd: std.fs.File,
+    folder: gila.Status,
+};
+pub fn getTaskFile(id: []const u8, arena: *stdx.Arena, gila_dir: std.fs.Dir) FindError!FindResult {
+    var buffer: [128]u8 = undefined;
+    const task_file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{id}) catch unreachable;
+
+    const fixed_buffer: []u8 = arena.pushArray(u8, std.fs.max_path_bytes);
+    defer arena.popArray(u8, fixed_buffer);
+    var path_arena = std.heap.FixedBufferAllocator.init(fixed_buffer);
+    const allocator = path_arena.allocator();
+
+    inline for (std.meta.fields(gila.Status)) |field| {
+        path_arena.reset();
+        result: {
+            const name = std.fs.path.join(allocator, &.{ field.name, id, task_file_name }) catch unreachable;
+
+            const file = gila_dir.openFile(name, .{ .mode = .read_only }) catch |err| switch (err) {
+                error.FileNotFound => {
+                    log.debug("Task {s} does not exist in {s} directory", .{ id, name });
+                    break :result;
+                },
+                else => |e| return e,
+            };
+            const status = comptime std.meta.stringToEnum(gila.Status, field.name).?;
+            log.debug("Found task {s} at {s}", .{ id, name });
+            return .{ .fd = file, .folder = status };
+        }
+    }
+
+    log.err("Task {s} does not exist in gila directory", .{id});
+    return error.TaskNotFound;
+}
+
+pub fn toTaskFile(self: *const Task, make_new: bool, arena: *stdx.Arena, gila_dir: std.fs.Dir) error{Invalid}![]u8 {
+    if (!gila.id.isValid(self.id)) {
+        log.err("Invalid task_id `{s}` a task is of the form word_word_ccc", .{self.id});
+        return error.Invalid;
+    }
+    var file_name_buffer: [32]u8 = undefined;
+    const file_name_md = std.fmt.bufPrint(&file_name_buffer, "{s}.md", .{self.id}) catch unreachable;
+
+    const path_description_file = std.fs.path.join(arena.allocator(), &.{ @tagName(self.status), self.id, file_name_md }) catch unreachable;
+
+    var found_file: bool = true;
+    const file = gila_dir.openFile(path_description_file, .{ .mode = .write_only }) catch |err| switch (err) {
+        error.FileNotFound => blk: {
+            if (!make_new) {
+                log.err("Task {s} does not exist in gila directory", .{self.id});
+                return error.Invalid;
+            }
+            found_file = false;
+
+            const task_dir_name = std.fs.path.join(arena.allocator(), &.{ @tagName(self.status), self.id }) catch unreachable;
+            gila_dir.makePath(task_dir_name) catch |e| {
+                log.err("Failed to create task directory {s}: {s}", .{ self.id, @errorName(e) });
+                return error.Invalid;
+            };
+            log.info("Successfully created task directory {s}", .{task_dir_name});
+
+            const description_file = gila_dir.createFile(path_description_file, .{}) catch |e| {
+                log.err("Failed to create {s}.md file: {s}", .{ self.id, @errorName(e) });
+                return error.Invalid;
+            };
+            log.info("Successfully created description file {s}", .{self.id});
+            break :blk description_file;
+        },
+        else => |e| {
+            log.err("Failed to open done file {s}: {s}", .{ path_description_file, @errorName(e) });
+            return error.Invalid;
+        },
+    };
+    defer file.close();
+
+    if (found_file and make_new) {
+        log.err("Task {s} already exists. If you want to create a new task you can wait for 1 second and try again.", .{self.id});
+        return error.Invalid;
+    }
+
+    self.flushToFile(file, path_description_file) catch return error.Invalid;
+
+    return path_description_file;
+}
+
+pub fn flushToFile(self: *const Task, file: std.fs.File, file_path: []const u8) error{Invalid}!void {
+    file.setEndPos(0) catch |err| {
+        log.err("Failed to set end position of done file {s}: {s}", .{ file_path, @errorName(err) });
+        return error.Invalid;
+    };
+
+    var write_buffer: [4096]u8 align(16) = undefined;
+    var file_writer = file.writer(&write_buffer);
+    const writer = &file_writer.interface;
+
+    writer.print("{f}", .{self.*}) catch |err| {
+        log.err("Failed to write to {s}.md: {s}", .{ self.id, @errorName(err) });
+        return error.Invalid;
+    };
+    // @IMPORTANT I never forget to flush
+    writer.flush() catch |err| {
+        log.err("Failed to flush {s}.md: {s}", .{ self.id, @errorName(err) });
+        return error.Invalid;
+    };
+    file.sync() catch |err| {
+        log.err("Failed to sync {s}.md: {s}", .{ self.id, @errorName(err) });
+        return error.Invalid;
+    };
+}
+
 pub fn format(self: *const Task, writer: *std.Io.Writer) std.Io.Writer.Error!void {
     try writer.print("{s}\n", .{gila.seperator});
     const fields = std.meta.fields(Task);
     inline for (fields) |field| {
-        if (comptime std.mem.eql(u8, field.name, "description") or std.mem.eql(u8, field.name, "extra_lines")) {
+        if (comptime std.mem.eql(u8, field.name, "description") or std.mem.eql(u8, field.name, "extra_lines") or std.mem.eql(u8, field.name, "id")) {
             continue;
         }
         const line_prefix = field.name ++ ": ";
@@ -266,106 +418,40 @@ fn write(comptime T: type, writer: *std.Io.Writer, data: T) !void {
     }
 }
 
-/// Returns the folder status of the task. The slices in task point to a buffer allocated on the arena.
-/// It is expected that the arena lifetime is atleast as long as you want the Task to exist.
-pub fn read(self: *Task, io: std.Io, arena: *stdx.Arena, task_name: []const u8, gila_dir: std.fs.Dir) ?gila.Status {
-    if (!gila.id.isValid(task_name)) {
-        log.err("Invalid task_id `{s}` a task is of the form word_word_ccc", .{task_name});
-        return null;
-    }
-    var file, const status = gila.Task.find(arena.allocator(), task_name, gila_dir) orelse return null;
-    defer file.close();
-
-    var buffer: [4096]u8 = undefined;
-    var reader = file.reader(io, &buffer);
-    reader.interface.fillMore() catch {
-        log.err("Failed to read task description file {s}", .{task_name});
-        return null;
-    };
-    var diagnostic: ?Diagnostic = null;
-    self.parse(&reader.interface, arena, &diagnostic) catch {
-        log.err("Failed to parse task description file {s}: {s}", .{ task_name, diagnostic.?.message });
-        return null;
-    };
-
-    if (status != self.status) {
-        log.warn(
-            "Task '{s}' was found in the '{s}' folder but was marked as '{s}' in the description. The description file wins",
-            .{ task_name, @tagName(status), @tagName(self.status) },
-        );
-    }
-
-    return status;
-}
-
-pub fn find(gpa: std.mem.Allocator, task_name: []const u8, gila_dir: std.fs.Dir) ?struct { std.fs.File, gila.Status } {
-    var buffer: [128]u8 = undefined;
-    const task_file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{task_name}) catch unreachable;
-
-    const fixed_buffer: []u8 = gpa.alloc(u8, std.fs.max_path_bytes) catch |err| {
-        log.err("Failed to allocate path buffer: {s}", .{@errorName(err)});
-        return null;
-    };
-    defer gpa.free(fixed_buffer);
-    var path_arena = std.heap.FixedBufferAllocator.init(fixed_buffer);
-
-    inline for (std.meta.fields(gila.Status)) |field| {
-        path_arena.reset();
-        result: {
-            const name = std.fs.path.join(path_arena.allocator(), &.{ field.name, task_name, task_file_name }) catch |err| {
-                log.err("Unexpected error when constructing path to task: {s}", .{@errorName(err)});
-                return null;
-            };
-
-            const file = gila_dir.openFile(name, .{ .mode = .read_only }) catch |err| switch (err) {
-                error.FileNotFound => {
-                    log.debug("Task {s} does not exist in {s} directory", .{ task_name, name });
-                    break :result;
-                },
-                else => |e| {
-                    log.err("Failed to open task {s}: {s}", .{ task_name, @errorName(e) });
-                    return null;
-                },
-            };
-            const status = comptime std.meta.stringToEnum(gila.Status, field.name).?;
-            log.debug("Found task {s} at {s}", .{ task_name, name });
-            return .{ file, status };
-        }
-    }
-
-    log.err("Task {s} does not exist in gila directory", .{task_name});
-    return null;
-}
-
-pub fn transition(self: *Task, to: gila.Status) error{Invalid}!void {
+pub const TransitionError = error{
+    ShouldBeWaiting,
+    ShouldBeDone,
+    ShouldBeCancelled,
+};
+pub fn transition(self: *Task, to: gila.Status) TransitionError!void {
     const status = self.status;
     switch (to) {
         .waiting => {
             if (self.waiting_on == null) {
-                log.err("Task '{s}' is in waiting state but has no waiting_on list", .{self.title});
-                return error.Invalid;
+                log.err("Task '{s}' is in waiting state but has no waiting_on list", .{self.id});
+                return error.ShouldBeWaiting;
             }
-            self.completed = null;
             self.status = .waiting;
+            self.completed = null;
         },
-        .started => {
+        .started, .todo => |s| {
             if (self.waiting_on != null) {
-                log.err("Task '{s}' is in started state but has a waiting_on list", .{self.title});
-                return error.Invalid;
+                log.err("Task '{s}' is in {s} state but has a waiting_on list", .{ self.id, @tagName(s) });
+                return error.ShouldBeWaiting;
             }
-            self.status = .started;
+            self.status = s;
             self.completed = null;
         },
         .cancelled => {
             if (self.waiting_on != null) {
                 log.err("Task '{s}' is in cancelled state but has a waiting_on list", .{self.title});
-                return error.Invalid;
+                return error.ShouldBeWaiting;
             }
             switch (status) {
                 else => self.status = .cancelled,
                 .done => {
                     log.err("Task '{s}' is in the done state but wants to moe to cancelled. This is strange", .{self.title});
-                    return error.Invalid;
+                    return error.ShouldBeDone;
                 },
             }
             if (self.completed) |_| {
@@ -373,18 +459,17 @@ pub fn transition(self: *Task, to: gila.Status) error{Invalid}!void {
             }
             self.completed = stdx.DateTimeUTC.now();
         },
-        .todo => {
-            if (self.waiting_on != null) {
-                log.err("Task '{s}' is in todo state but has a waiting_on list", .{self.title});
-                return error.Invalid;
-            }
-            self.status = .todo;
-            self.completed = null;
-        },
         .done => {
             if (self.waiting_on != null) {
                 log.err("Task '{s}' is in done state but has a waiting_on list", .{self.title});
-                return error.Invalid;
+                return error.ShouldBeWaiting;
+            }
+            switch (status) {
+                else => self.status = .cancelled,
+                .cancelled => {
+                    log.err("Task '{s}' is in the cancelled state but wants to move to done. This is strange", .{self.id});
+                    return error.ShouldBeCancelled;
+                },
             }
             self.status = .done;
             if (self.completed) |_| {
@@ -403,8 +488,14 @@ pub const ValidateError = error{
     CompletedNotFoundWhenCompletedStatus,
 };
 pub fn validate(self: *const Task, error_out: *?[]const u8) ValidateError!void {
-    if (self.title.len == 0) {
-        error_out.* = "Task title cannot be empty";
+    // @TODO [[powerful_gecko_m5d]]
+    if (!gila.id.isValid(self.id)) {
+        error_out.* = "Task id must be a valid task_id";
+        return error.Invalid;
+    }
+
+    if (!titleIsValid(self.title)) {
+        error_out.* = "Task title is invalid. Empty or contains \\r or \\n";
         return error.Invalid;
     }
 
@@ -485,6 +576,36 @@ pub fn validate(self: *const Task, error_out: *?[]const u8) ValidateError!void {
     }
 }
 
+fn titleIsValid(title: []const u8) bool {
+    if (title.len == 0) {
+        log.err("Title cannot be empty", .{});
+        return false;
+    }
+    const invalids: []const u8 = "\r\n";
+    const invalid_char = std.mem.findAny(
+        u8,
+        title,
+        invalids,
+    );
+
+    if (invalid_char) |index| {
+        const invalids_escaped: []const u8 = "\\r\\n";
+        log.err("Title cannot contain any of '{s}'. Found one at index {d}", .{ invalids_escaped, index });
+        return false;
+    }
+    return true;
+}
+
+inline fn Error(diagnostics: *?Diagnostic, message: []const u8, line: usize, column_start: usize, column_end: usize) error{Invalid} {
+    diagnostics.* = .{
+        .line = line,
+        .column_start = column_start,
+        .column_end = column_end,
+        .message = message,
+    };
+    return error.Invalid;
+}
+
 test "Task.parse" {
     const buffer =
         \\---
@@ -542,15 +663,18 @@ test "Task.parse" {
     ;
     const data = try std.testing.allocator.dupe(u8, buffer);
     defer std.testing.allocator.free(data);
-    var task: Task = undefined;
-    var diagnostic: ?Diagnostic = null;
     var reader = std.Io.Reader.fixed(data);
     var memory: [4096 * 2]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&memory);
-    task.parse(&reader, &arena, &diagnostic) catch {
+
+    var task = Task.init("abc_def_123") catch return error.InvalidId;
+
+    var diagnostic: ?Diagnostic = null;
+    task.fromReader(&reader, &arena, &diagnostic) catch {
         std.debug.print("Diagnostic: {s}\n", .{diagnostic.?.message});
         return error.TestFailedToParse;
     };
+
     if (task.tags) |tags| {
         try std.testing.expectEqual(@as(usize, 3), tags.len);
         try std.testing.expectEqualStrings("a", tags[0]);

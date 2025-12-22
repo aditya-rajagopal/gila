@@ -74,9 +74,6 @@ pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
     if (!self.verbose) {
         root.log_level = .warn;
     }
-    if (!validateTitle(self.positional.title)) {
-        return;
-    }
 
     const gila_path, var gila_dir = common.getGilaDir(allocator) orelse return;
     defer gila_dir.close();
@@ -86,62 +83,41 @@ pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
         return;
     };
     log.debug("Generated task_id: {s}", .{task_name});
+
     const user_name = common.getUserName(allocator) catch |err| {
         log.err("Failed to get user name: {s}", .{@errorName(err)});
         return;
     };
-    const date_time = stdx.DateTimeUTC.now();
+    const creation_dt = stdx.DateTimeUTC.now();
 
     const task: gila.Task = .{
+        .id = task_name,
         .title = self.positional.title,
         .status = if (self.waiting_on) |_| .waiting else .todo,
         .priority = self.priority,
         .priority_value = self.priority_value,
         .owner = user_name,
-        .created = date_time,
+        .created = creation_dt,
         .description = if (self.description) |description| description else "",
         .tags = if (self.tags) |tags| tags.tags else null,
         .waiting_on = if (self.waiting_on) |waiting_on| waiting_on.tasks else null,
         .completed = null,
         .extra_lines = null,
     };
+
     var error_out: ?[]const u8 = null;
     task.validate(&error_out) catch {
         log.err("Failed to validate task description file {s}: {s}", .{ task_name, error_out.? });
         return;
     };
 
-    const description_file = createNewDescription(allocator, task_name, gila_dir, task.status) orelse return;
-
-    var buffer: [4096]u8 = undefined;
-    var writer = description_file.writer(&buffer);
-    const interface: *std.Io.Writer = &writer.interface;
-
-    interface.print("{f}", .{task}) catch |err| {
-        log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
-        return;
-    };
-
-    // @IMPORTANT I never forget to flush
-    interface.flush() catch |err| {
-        log.err("Failed to flush {s}.md: {s}", .{ task_name, @errorName(err) });
-        return;
-    };
-
-    description_file.sync() catch |err| {
-        log.err("Failed to sync {s}.md: {s}", .{ task_name, @errorName(err) });
-        return;
-    };
-    log.info("Successfully written template to {s}.md", .{task_name});
-
-    description_file.close();
+    const description_file = task.toTaskFile(true, arena, gila_dir) catch return;
 
     // @TODO make the default editor configurable
     if (self.edit) {
         const editor_name = std.process.getEnvVarOwned(allocator, "EDITOR") catch "vim";
-        const task_file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{task_name}) catch unreachable;
 
-        const file_name = std.fs.path.join(allocator, &.{ gila_path, @tagName(task.status), task_name, task_file_name }) catch |err| {
+        const file_name = std.fs.path.join(allocator, &.{ gila_path, description_file }) catch |err| {
             log.err("Unexpected error while joining path: {s}", .{@errorName(err)});
             return;
         };
@@ -161,59 +137,4 @@ pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
     var stdout = std.fs.File.stdout().writer(&.{});
     stdout.interface.print("New task created: {s}\n", .{task_name}) catch unreachable;
     return;
-}
-
-// @TODO this is probably a common functionality
-fn createNewDescription(allocator: std.mem.Allocator, task_name: []const u8, gila_dir: std.fs.Dir, status: gila.Status) ?std.fs.File {
-    const task_dir_name = std.fs.path.join(allocator, &.{ @tagName(status), task_name }) catch |err| {
-        log.err("Unexpected error while joining todo/{s}: {s}", .{ task_name, @errorName(err) });
-        return null;
-    };
-
-    const result = gila_dir.makePathStatus(task_dir_name) catch |err| {
-        log.err("Failed to create task directory {s}: {s}", .{ task_name, @errorName(err) });
-        return null;
-    };
-    if (result == .existed) {
-        log.err("Task {s} already exists. If you want to create a new task you can wait for 1 second and try again.", .{task_name});
-        return null;
-    }
-    log.info("Successfully created task directory {s}", .{task_dir_name});
-
-    var task_dir = gila_dir.openDir(task_dir_name, .{}) catch |err| {
-        log.err("Failed to open task {s}: {s}", .{ task_dir_name, @errorName(err) });
-        return null;
-    };
-    defer task_dir.close();
-    log.debug("Opened task directory {s}", .{task_dir_name});
-
-    var buffer: [32]u8 = undefined;
-    const file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{task_name}) catch unreachable;
-
-    const description_file = task_dir.createFile(file_name, .{}) catch |err| {
-        log.err("Failed to create {s}.md file: {s}", .{ task_name, @errorName(err) });
-        return null;
-    };
-    log.info("Successfully created description file {s}", .{file_name});
-    return description_file;
-}
-
-fn validateTitle(title: []const u8) bool {
-    if (title.len == 0) {
-        log.err("Title cannot be empty", .{});
-        return false;
-    }
-    const invalids: []const u8 = "\r\n";
-    const invalid_char = std.mem.findAny(
-        u8,
-        title,
-        invalids,
-    );
-
-    if (invalid_char) |index| {
-        const invalids_escaped: []const u8 = "\\r\\n";
-        log.err("Title cannot contain any of '{s}'. Found one at index {d}", .{ invalids_escaped, index });
-        return false;
-    }
-    return true;
 }

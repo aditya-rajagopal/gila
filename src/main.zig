@@ -13,13 +13,16 @@ const Done = @import("commands/done.zig");
 const Sync = @import("commands/sync.zig");
 
 pub const std_options: std.Options = .{
+    .log_level = default_log_level,
     .logFn = logFn,
 };
 
-pub var log_level: std.log.Level = switch (builtin.mode) {
+const default_log_level: std.log.Level = switch (builtin.mode) {
     .Debug => std.log.Level.debug,
     else => std.log.Level.info,
 };
+
+pub var log_level: std.log.Level = default_log_level;
 
 pub fn logFn(
     comptime level: std.log.Level,
@@ -31,8 +34,8 @@ pub fn logFn(
     const level_text = comptime blk: {
         const text: []const u8 = level.asText();
         var result: []const u8 = &.{};
-        for (text) |*c| {
-            result = result ++ &[_]u8{std.ascii.toUpper(c.*)};
+        for (text) |c| {
+            result = result ++ &[_]u8{std.ascii.toUpper(c)};
         }
         break :blk result;
     };

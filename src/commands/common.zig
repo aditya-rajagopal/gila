@@ -12,6 +12,7 @@ pub fn getUserName(gpa: std.mem.Allocator) ![]const u8 {
 }
 
 pub fn moveTaskData(allocator: std.mem.Allocator, gila_dir: std.fs.Dir, task_name: []const u8, from: gila.Status, to: gila.Status) !void {
+    if (from == to) return;
     const from_folder = std.fs.path.join(allocator, &.{ @tagName(from), task_name }) catch |err| {
         log.err("Unexpected error while joining {s}/{s}: {s}", .{ @tagName(from), task_name, @errorName(err) });
         return;

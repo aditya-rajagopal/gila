@@ -55,8 +55,8 @@ pub fn execute(self: Done, io: std.Io, arena: *stdx.Arena) void {
     const gila_path, var gila_dir = common.getGilaDir(allocator) orelse return;
     defer gila_dir.close();
 
-    var task: gila.Task = undefined;
-    const status = task.read(io, arena, self.positional.task, gila_dir) orelse return;
+    var result = gila.Task.findTaskAndRead(self.positional.task, io, arena, gila_dir) catch return;
+    var task = &result.task;
 
     if (task.status == .cancelled) {
         log.debug("TODO: Move to cancelled folder", .{});
@@ -70,62 +70,41 @@ pub fn execute(self: Done, io: std.Io, arena: *stdx.Arena) void {
     log.info("Successfully parsed task description file contents", .{});
 
     if (task.status == .done) {
-        if (status == .done and task.completed != null) {
+        if (result.status == .done and task.completed != null) {
             log.err("Task {s} is already marked as done and is in the right place", .{self.positional.task});
             return;
         }
-        if (status == .done and task.completed == null) {
+        if (result.status == .done and task.completed == null) {
             log.warn("Task '{s}' was found in the done folder but has no completion time. Adding that", .{self.positional.task});
         }
-    } else {
-        task.status = .done;
     }
 
-    task.completed = stdx.DateTimeUTC.now();
-
-    common.moveTaskData(allocator, gila_dir, self.positional.task, status, gila.Status.done) catch return;
-
-    var task_file_buffer: [32]u8 = undefined;
-    const task_file_name = std.fmt.bufPrint(&task_file_buffer, "{s}.md", .{self.positional.task}) catch unreachable;
-
-    const done_file_name = std.fs.path.join(allocator, &.{ "done", self.positional.task, task_file_name }) catch |err| {
-        log.err("Unexpected error while joining done/{s}: {s}", .{ self.positional.task, @errorName(err) });
-        return;
+    task.transition(.done) catch |err| switch (err) {
+        error.ShouldBeWaiting => {
+            // @TODO Check if all the tasks that this task depends on are done. If they are, then transition to done.
+            log.err("Task {s} has a waiting_on list and is trying to be marked as done. Use sync for now", .{self.positional.task});
+            log.err("TODO: When executing done, if there is a waiting_on list we need to check the tasks in it before deciding to transition to done", .{});
+            return;
+        },
+        error.ShouldBeDone => unreachable,
+        error.ShouldBeCancelled => {
+            log.err("Task {s} is in cancelled state and is trying to be marked as done.", .{self.positional.task});
+            task.transition(.cancelled) catch {
+                log.err("Failed to transition task {s} to cancelled state", .{self.positional.task});
+                return;
+            };
+        },
     };
 
-    const done_file = gila_dir.openFile(done_file_name, .{ .mode = .write_only }) catch |err| {
-        log.err("Failed to open done file {s}: {s}", .{ done_file_name, @errorName(err) });
-        return;
-    };
-    defer done_file.close();
-    done_file.setEndPos(0) catch |err| {
-        log.err("Failed to set end position of done file {s}: {s}", .{ done_file_name, @errorName(err) });
-        return;
-    };
+    common.moveTaskData(allocator, gila_dir, self.positional.task, result.status, task.status) catch return;
 
-    var write_buffer: [4096]u8 align(16) = undefined;
-    var file_writer = done_file.writer(&write_buffer);
-    const writer = &file_writer.interface;
-
-    writer.print("{f}", .{task}) catch |err| {
-        log.err("Failed to write to {s}.md: {s}", .{ self.positional.task, @errorName(err) });
-        return;
-    };
-    // @IMPORTANT I never forget to flush
-    writer.flush() catch |err| {
-        log.err("Failed to flush {s}.md: {s}", .{ self.positional.task, @errorName(err) });
-        return;
-    };
-    done_file.sync() catch |err| {
-        log.err("Failed to sync {s}.md: {s}", .{ self.positional.task, @errorName(err) });
-        return;
-    };
+    const file_path = task.toTaskFile(false, arena, gila_dir) catch return;
 
     var stdout = std.fs.File.stdout().writer(&.{});
     stdout.interface.print("Successfully completed task {s}. Great success!\n", .{self.positional.task}) catch unreachable;
 
     if (self.edit) {
-        const file_name = std.fs.path.join(allocator, &.{ gila_path, done_file_name }) catch |err| {
+        const file_name = std.fs.path.join(allocator, &.{ gila_path, file_path }) catch |err| {
             log.err("Unexpected error while joining done/{s}: {s}", .{ self.positional.task, @errorName(err) });
             return;
         };

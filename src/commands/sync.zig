@@ -130,19 +130,8 @@ pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
                 continue;
             };
 
-            var reader_buffer: [4096]u8 = undefined;
-            defer file.close();
-            var reader = file.reader(io, &reader_buffer);
-
-            reader.interface.fillMore() catch {
-                log.err("Failed to read task description file {s}", .{task_name});
-                index += 1;
-                continue;
-            };
-            var diagnostic: ?gila.Task.Diagnostic = null;
-            var task: gila.Task = .default;
-            task.parse(&reader.interface, &local_arena, &diagnostic) catch {
-                log.err("Failed to parse task description file {s}: {s}", .{ task_name, diagnostic.?.message });
+            var task = gila.Task.init(task_name) catch unreachable;
+            task.fromFile(file, io, &local_arena) catch {
                 index += 1;
                 continue;
             };
@@ -195,28 +184,7 @@ pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
                     task.waiting_on = null;
                 } else if (new_array.items.len != waiting_on.len) {
                     task.waiting_on = new_array.toOwnedSlice(local_arena.allocator()) catch unreachable;
-                    file.setEndPos(0) catch |err| {
-                        log.err("Failed to set end position of done file {s}: {s}", .{ file_name, @errorName(err) });
-                        return;
-                    };
-
-                    var write_buffer: [4096]u8 align(16) = undefined;
-                    var file_writer = file.writer(&write_buffer);
-                    const writer = &file_writer.interface;
-
-                    writer.print("{f}", .{task}) catch |err| {
-                        log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
-                        return;
-                    };
-                    // @IMPORTANT I never forget to flush
-                    writer.flush() catch |err| {
-                        log.err("Failed to flush {s}.md: {s}", .{ task_name, @errorName(err) });
-                        return;
-                    };
-                    file.sync() catch |err| {
-                        log.err("Failed to sync {s}.md: {s}", .{ task_name, @errorName(err) });
-                        return;
-                    };
+                    task.flushToFile(file, file_name) catch {};
                     index += 1;
                     continue;
                 } else {
@@ -288,29 +256,23 @@ fn parseFolder(
     while (index < set.keys().len) {
         const task_name = set.keys()[index];
         defer local_arena.reset(false);
-        var buffer: [128]u8 = undefined;
-        const file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{task_name}) catch unreachable;
+        const file_name = local_arena.pushArray(u8, task_name.len + 3);
+        @memcpy(file_name[0..task_name.len], task_name);
+        @memcpy(file_name[task_name.len..][0..3], ".md");
         const path = std.fs.path.join(local_arena.allocator(), &.{ task_name, file_name }) catch unreachable;
+
         const file = dir.openFile(path, .{}) catch |err| {
             log.err("Unexpected error while opening task file {s}: {s}", .{ task_name, @errorName(err) });
             index += 1;
             continue;
         };
-        var reader_buffer: [4096]u8 = undefined;
-        defer file.close();
-        var reader = file.reader(io, &reader_buffer);
-        reader.interface.fillMore() catch {
-            log.err("Failed to read task description file {s}", .{task_name});
+
+        var task = gila.Task.init(task_name) catch unreachable;
+        task.fromFile(file, io, local_arena) catch {
             index += 1;
             continue;
         };
-        var diagnostic: ?gila.Task.Diagnostic = null;
-        var task: gila.Task = .default;
-        task.parse(&reader.interface, local_arena, &diagnostic) catch {
-            log.err("Failed to parse task description file {s}: {s}", .{ task_name, diagnostic.?.message });
-            index += 1;
-            continue;
-        };
+
         var error_out: ?[]const u8 = null;
         var changed: bool = false;
         task.validate(&error_out) catch |err| switch (err) {
@@ -341,6 +303,7 @@ fn parseFolder(
         };
         if (task.status == folder and !changed) {
             index += 1;
+            log.info("Task '{s}' is in the same state as the folder. Skipping", .{task_name});
         } else {
             const result = moveTask(local_arena, file_name, &task, folder, task.status, gila_dir);
             switch (result) {
@@ -392,40 +355,10 @@ fn moveTask(
         };
     };
 
-    common.moveTaskData(arena.allocator(), gila_dir, task_name, from, to) catch return .err;
+    common.moveTaskData(arena.allocator(), gila_dir, task_name, from, task.status) catch return .err;
 
-    const new_file_name = std.fs.path.join(arena.allocator(), &.{ @tagName(to), task_name, file_name }) catch |err| {
-        log.err("Unexpected error while joining {s}/{s}: {s}", .{ @tagName(to), task_name, @errorName(err) });
-        return .err;
-    };
+    _ = task.toTaskFile(false, arena, gila_dir) catch return .err;
 
-    const new_file = gila_dir.openFile(new_file_name, .{ .mode = .write_only }) catch |err| {
-        log.err("Failed to open done file {s}: {s}", .{ new_file_name, @errorName(err) });
-        return .err;
-    };
-    defer new_file.close();
-    new_file.setEndPos(0) catch |err| {
-        log.err("Failed to set end position of done file {s}: {s}", .{ new_file_name, @errorName(err) });
-        return .err;
-    };
-
-    var write_buffer: [4096]u8 align(16) = undefined;
-    var file_writer = new_file.writer(&write_buffer);
-    const writer = &file_writer.interface;
-
-    writer.print("{f}", .{task}) catch |err| {
-        log.err("Failed to write to {s}.md: {s}", .{ task_name, @errorName(err) });
-        return .err;
-    };
-    // @IMPORTANT I never forget to flush
-    writer.flush() catch |err| {
-        log.err("Failed to flush {s}.md: {s}", .{ task_name, @errorName(err) });
-        return .err;
-    };
-    new_file.sync() catch |err| {
-        log.err("Failed to sync {s}.md: {s}", .{ task_name, @errorName(err) });
-        return .err;
-    };
     log.info("Successfully moved task {s} to {s}", .{ task_name, @tagName(task.status) });
     return .{ .moved = task.status };
 }

@@ -21,36 +21,6 @@ pub var log_level: std.log.Level = switch (builtin.mode) {
     else => std.log.Level.info,
 };
 
-// pub fn logFn(
-//     comptime level: std.log.Level,
-//     comptime scope: @EnumLiteral(),
-//     comptime format: []const u8,
-//     args: anytype,
-// ) void {
-//     if (@intFromEnum(level) > @intFromEnum(log_level)) return;
-//     const level_text = comptime blk: {
-//         const text: []const u8 = level.asText();
-//         var result: []const u8 = &.{};
-//         for (text) |*c| {
-//             result = result ++ &[_]u8{std.ascii.toUpper(c.*)};
-//         }
-//         break :blk result;
-//     };
-//     const scope_prefix = "(" ++ @tagName(scope) ++ "): ";
-//     // const date_time = DateTimeUTC.now();
-//
-//     var stderr_writer = std.fs.File.stderr().writer(&.{});
-//     const writer = &stderr_writer.interface;
-//     std.debug.lockStdErr();
-//
-//     nosuspend {
-//         // date_time.format("", .{}, writer) catch return;
-//         // " " ++
-//         writer.print(level_text ++ scope_prefix ++ format ++ "\n", args) catch return;
-//     }
-//     std.debug.unlockStdErr();
-// }
-
 pub fn logFn(
     comptime level: std.log.Level,
     comptime scope: @EnumLiteral(),

@@ -42,7 +42,7 @@ pub const help =
     \\
 ;
 
-pub fn execute(self: Done, arena: *stdx.Arena) void {
+pub fn execute(self: Done, io: std.Io, arena: *stdx.Arena) void {
     const allocator = arena.allocator();
     if (!self.verbose) {
         root.log_level = .warn;
@@ -56,7 +56,7 @@ pub fn execute(self: Done, arena: *stdx.Arena) void {
     defer gila_dir.close();
 
     var task: gila.Task = undefined;
-    const status = task.read(arena, self.positional.task, gila_dir) orelse return;
+    const status = task.read(io, arena, self.positional.task, gila_dir) orelse return;
 
     if (task.status == .cancelled) {
         log.debug("TODO: Move to cancelled folder", .{});

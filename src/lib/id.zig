@@ -10,8 +10,8 @@ pub fn new(gpa: std.mem.Allocator) ![]u8 {
         gen = std.Random.ChaCha.init(secret_seed);
         initialized = true;
     }
-    var buffer: [64]u8 = undefined;
-    const entropy = std.fmt.bufPrint(&buffer, "{d}", .{std.time.milliTimestamp()}) catch unreachable;
+    const now = std.time.Instant.now() catch unreachable;
+    const entropy: []const u8 = std.mem.asBytes(&now);
     gen.addEntropy(entropy);
     var rng = gen.random();
     const random_number = rng.int(u32);

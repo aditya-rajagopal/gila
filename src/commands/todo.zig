@@ -68,7 +68,8 @@ pub const help =
     \\
 ;
 
-pub fn execute(self: Todo, arena: *stdx.Arena) void {
+pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
+    _ = io;
     const allocator = arena.allocator();
     if (!self.verbose) {
         root.log_level = .warn;

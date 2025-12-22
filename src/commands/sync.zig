@@ -51,7 +51,7 @@ const TaskSets = struct {
     };
 };
 
-pub fn execute(self: Sync, arena: *stdx.Arena) void {
+pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
     // @TODO [[massive_raid_664]]
     const allocator = arena.allocator();
     if (!self.verbose) {
@@ -94,19 +94,19 @@ pub fn execute(self: Sync, arena: *stdx.Arena) void {
     }
 
     if (maps.done) |*done_map| {
-        parseFolder(gila_dir, gila.Status.done, &local_arena, &maps, done_map, arena, &transitions) catch return;
+        parseFolder(io, gila_dir, gila.Status.done, &local_arena, &maps, done_map, arena, &transitions) catch return;
     }
 
     if (maps.todo) |*todo_map| {
-        parseFolder(gila_dir, gila.Status.todo, &local_arena, &maps, todo_map, arena, &transitions) catch return;
+        parseFolder(io, gila_dir, gila.Status.todo, &local_arena, &maps, todo_map, arena, &transitions) catch return;
     }
 
     if (maps.started) |*started_map| {
-        parseFolder(gila_dir, gila.Status.started, &local_arena, &maps, started_map, arena, &transitions) catch return;
+        parseFolder(io, gila_dir, gila.Status.started, &local_arena, &maps, started_map, arena, &transitions) catch return;
     }
 
     if (maps.cancelled) |*cancelled_map| {
-        parseFolder(gila_dir, gila.Status.cancelled, &local_arena, &maps, cancelled_map, arena, &transitions) catch return;
+        parseFolder(io, gila_dir, gila.Status.cancelled, &local_arena, &maps, cancelled_map, arena, &transitions) catch return;
     }
 
     if (maps.waiting) |*waiting_map| {
@@ -132,7 +132,7 @@ pub fn execute(self: Sync, arena: *stdx.Arena) void {
 
             var reader_buffer: [4096]u8 = undefined;
             defer file.close();
-            var reader = file.reader(&reader_buffer);
+            var reader = file.reader(io, &reader_buffer);
 
             reader.interface.fillMore() catch {
                 log.err("Failed to read task description file {s}", .{task_name});
@@ -269,6 +269,7 @@ pub fn execute(self: Sync, arena: *stdx.Arena) void {
 }
 
 fn parseFolder(
+    io: std.Io,
     gila_dir: std.fs.Dir,
     folder: gila.Status,
     local_arena: *stdx.Arena,
@@ -297,7 +298,7 @@ fn parseFolder(
         };
         var reader_buffer: [4096]u8 = undefined;
         defer file.close();
-        var reader = file.reader(&reader_buffer);
+        var reader = file.reader(io, &reader_buffer);
         reader.interface.fillMore() catch {
             log.err("Failed to read task description file {s}", .{task_name});
             index += 1;
@@ -347,7 +348,6 @@ fn parseFolder(
                     index += 1;
                 },
                 .moved => |to_state| switch (to_state) {
-                    .todo => unreachable,
                     inline else => |s| {
                         if (@field(sets, @tagName(s))) |*m| {
                             m.put(arena.allocator(), task_name, {}) catch unreachable;

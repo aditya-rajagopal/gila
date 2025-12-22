@@ -23,7 +23,7 @@ pub var log_level: std.log.Level = switch (builtin.mode) {
 
 pub fn logFn(
     comptime level: std.log.Level,
-    comptime scope: @Type(.enum_literal),
+    comptime scope: @EnumLiteral(),
     comptime format: []const u8,
     args: anytype,
 ) void {
@@ -119,11 +119,14 @@ pub fn main() void {
 
     const cli = flags.parseArgs(arena.allocator(), &args, CLIArgs);
 
+    var threaded = std.Io.Threaded.init_single_threaded;
+    const io = threaded.ioBasic();
+
     switch (cli) {
-        .init => |init| init.execute(&arena),
-        .todo => |todo| todo.execute(&arena),
-        .done => |done| done.execute(&arena),
-        .sync => |sync| sync.execute(&arena),
+        .init => |init| init.execute(io, &arena),
+        .todo => |todo| todo.execute(io, &arena),
+        .done => |done| done.execute(io, &arena),
+        .sync => |sync| sync.execute(io, &arena),
         .version => {
             var stdout = std.fs.File.stdout().writer(&.{});
             stdout.interface.print("v{s}\n", .{zon.version}) catch |err| {

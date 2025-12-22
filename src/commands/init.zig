@@ -35,7 +35,8 @@ pub const help =
     \\
 ;
 
-pub fn execute(self: @This(), arena: *stdx.Arena) void {
+pub fn execute(self: @This(), io: std.Io, arena: *stdx.Arena) void {
+    _ = io;
     if (!self.verbose) {
         root.log_level = .warn;
     }

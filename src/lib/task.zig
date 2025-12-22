@@ -80,19 +80,18 @@ pub fn parse(
 
     var counts = comptime blk: {
         var count_fields = fields[0..fields.len].*;
-        for (&count_fields) |*field| {
-            field.type = u32;
-            field.alignment = @alignOf(u32);
-            field.default_value_ptr = @ptrCast(&@as(u32, 0));
+        var names: [count_fields.len][]const u8 = undefined;
+        var types: [count_fields.len]type = undefined;
+        var attributes: [count_fields.len]std.builtin.Type.StructField.Attributes = undefined;
+        for (&count_fields, 0..) |*field, i| {
+            names[i] = field.name;
+            types[i] = u32;
+            attributes[i] = .{
+                .@"align" = @alignOf(u32),
+                .default_value_ptr = @ptrCast(&@as(u32, 0)),
+            };
         }
-        break :blk @Type(.{
-            .@"struct" = .{
-                .layout = .auto,
-                .fields = &count_fields,
-                .decls = &.{},
-                .is_tuple = false,
-            },
-        }){};
+        break :blk @Struct(.auto, null, names[0..], &types, &attributes){};
     };
     var finished_header = false;
     parsing_next_paramter: while (line) |l| {
@@ -119,7 +118,17 @@ pub fn parse(
                 // @TODO Better error messages
                 const current_line_number = line_number;
                 var diagnostic: ?Diagnostic = null;
-                @field(self, field.name) = parseValue(T, arena, &line, &line_number, &column, reader, &diagnostic) catch return error.Invalid;
+                @field(self, field.name) = parseValue(T, arena, &line, &line_number, &column, reader, &diagnostic) catch |err| switch (err) {
+                    error.EmptyList => blk: {
+                        if (T == []const u8) unreachable;
+                        if (@typeInfo(field.type) == .optional) {
+                            break :blk null;
+                        } else {
+                            return Error(diagnostics, "Failed to find any elements in field for a list parameter in header", line_number, column, column);
+                        }
+                    },
+                    else => return error.Invalid,
+                };
                 @field(counts, field.name) += 1;
                 if (line_number > current_line_number) {
                     continue :parsing_next_paramter;
@@ -158,7 +167,7 @@ fn parseValue(
     column: *usize,
     reader: *std.Io.Reader,
     diagnostics: *?Diagnostic,
-) error{Invalid}!T {
+) error{ Invalid, EmptyList }!T {
     const l = line.* orelse return Error(diagnostics, "Missing parameter value", line_number.*, column.*, 0);
     if (T == []const u8) {
         if (l[column.*..].len == 0) return Error(diagnostics, "Missing parameter value", line_number.*, column.*, l.len);
@@ -193,7 +202,7 @@ fn parseValue(
                 break;
             }
         }
-        if (num_elements == 0) return Error(diagnostics, "Failed to find any elements in field for a list parameter in header", line_number.*, column.*, column.*);
+        if (num_elements == 0) return error.EmptyList; //return Error(diagnostics, "Failed to find any elements in field for a list parameter in header", line_number.*, column.*, column.*);
         var lines = arena.memory[start..arena.currentPosition()];
         const elements = arena.pushArray([]const u8, num_elements);
         for (0..num_elements) |index| {
@@ -259,7 +268,7 @@ fn write(comptime T: type, writer: *std.Io.Writer, data: T) !void {
 
 /// Returns the folder status of the task. The slices in task point to a buffer allocated on the arena.
 /// It is expected that the arena lifetime is atleast as long as you want the Task to exist.
-pub fn read(self: *Task, arena: *stdx.Arena, task_name: []const u8, gila_dir: std.fs.Dir) ?gila.Status {
+pub fn read(self: *Task, io: std.Io, arena: *stdx.Arena, task_name: []const u8, gila_dir: std.fs.Dir) ?gila.Status {
     if (!gila.id.isValid(task_name)) {
         log.err("Invalid task_id `{s}` a task is of the form word_word_ccc", .{task_name});
         return null;
@@ -268,7 +277,7 @@ pub fn read(self: *Task, arena: *stdx.Arena, task_name: []const u8, gila_dir: st
     defer file.close();
 
     var buffer: [4096]u8 = undefined;
-    var reader = file.reader(&buffer);
+    var reader = file.reader(io, &buffer);
     reader.interface.fillMore() catch {
         log.err("Failed to read task description file {s}", .{task_name});
         return null;
@@ -373,7 +382,6 @@ pub fn transition(self: *Task, to: gila.Status) error{Invalid}!void {
             self.completed = null;
         },
         .done => {
-            log.err("Transitioning task '{s}' to done status", .{self.title});
             if (self.waiting_on != null) {
                 log.err("Task '{s}' is in done state but has a waiting_on list", .{self.title});
                 return error.Invalid;

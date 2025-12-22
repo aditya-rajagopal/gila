@@ -32,7 +32,7 @@ views:
     columnSize:
       note.title: 538
       note.priority: 73
-      note.priority_value: 41
+      note.priority_value: 77
       note.tags: 96
       note.status: 71
       note.created: 178

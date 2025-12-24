@@ -216,7 +216,7 @@ pub fn findTaskAndRead(id: []const u8, io: std.Io, arena: *stdx.Arena, gila_dir:
         return error.Failed;
     };
 
-    var result = getTaskFile(task.id, arena, gila_dir) catch |err| switch (err) {
+    var result = getTaskFileById(task.id, arena, gila_dir) catch |err| switch (err) {
         error.TaskNotFound => {
             log.err("Task {s} does not exist in gila directory", .{task.id});
             return error.Failed;
@@ -261,7 +261,7 @@ pub const FindResult = struct {
     fd: std.fs.File,
     folder: gila.Status,
 };
-pub fn getTaskFile(id: []const u8, arena: *stdx.Arena, gila_dir: std.fs.Dir) FindError!FindResult {
+pub fn getTaskFileById(id: []const u8, arena: *stdx.Arena, gila_dir: std.fs.Dir) FindError!FindResult {
     var buffer: [128]u8 = undefined;
     const task_file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{id}) catch unreachable;
 

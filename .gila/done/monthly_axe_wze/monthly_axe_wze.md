@@ -1,10 +1,11 @@
 ---
 title: Sometimes lists havde a space befre '- ' deal with that
-status: todo
+status: done
 priority_value: 50
 priority: medium
 owner: adiraj
 created: 2025-12-21T16:46:37Z
-tags:
-  - bug
+completed: 2025-12-24T01:41:55Z
+tags: 
+- bug
 ---

@@ -17,6 +17,7 @@ priority_value: u8 = 50,
 description: ?[]const u8 = null,
 tags: ?common.Tags = null,
 waiting_on: ?common.WaitingOn = null,
+blocks: ?common.Blocks = null,
 verbose: bool = false,
 edit: bool = false,
 positional: struct {
@@ -26,10 +27,10 @@ positional: struct {
 pub const help =
     \\Usage:
     \\
-    \\    gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>] 
-    \\              [--description=<description>] [--tags="<tag1>,<tag2>,..."] 
-    \\              [--waiting-on="<task1>,<task2>,..."] [--verbose]
-    \\              [--edit] <title>
+    \\    gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>]
+    \\              [--description=<description>] [--tags="<tag1>,<tag2>,..."]
+    \\              [--waiting-on="<task1>,<task2>,..."] [--blocks="<task1>,<task2>,..."]
+    \\              [--verbose] [--edit] <title>
     \\
     \\Create a new task to the current project.
     \\
@@ -37,10 +38,10 @@ pub const help =
     \\    -h, --help
     \\        Prints this help message.
     \\
-    \\    --priority=<priority>  
+    \\    --priority=<priority>
     \\        The priority of the task. Can be one of low, medium, high, or urgent.
     \\
-    \\    --priority-value=<value>  
+    \\    --priority-value=<value>
     \\        The priority value of the task. Can be an integer between 0 to 255. Defaults to 50.
     \\
     \\    --description=<description>
@@ -53,7 +54,11 @@ pub const help =
     \\        The tasks that this task depends on. Each task should be a valid task_id of the form `word_word_ccc'.
     \\        If this is provided the task will be created as a waiting task.
     \\
-    \\    --verbose 
+    \\    --blocks="<task1>,<task2>,..."
+    \\        The tasks that this new task will block. Blocked tasks will transition to waiting
+    \\        status with this task added to their waiting_on list.
+    \\
+    \\    --verbose
     \\        Run verbosely. Prints the contents of the task description file to stdout.
     \\
     \\    --edit
@@ -69,7 +74,6 @@ pub const help =
 ;
 
 pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
-    _ = io;
     const allocator = arena.allocator();
     if (!self.verbose) {
         root.log_level = .warn;
@@ -112,6 +116,63 @@ pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
     };
 
     const description_file = task.toTaskFile(true, arena, gila_dir) catch return;
+
+    if (self.blocks) |blocks| {
+        const fixed_buffer: []u8 = arena.pushArray(u8, 128 * 1024);
+        var local_arena = stdx.Arena.initBuffer(fixed_buffer);
+        for (blocks.tasks) |blocked_task_id| {
+            local_arena.reset(false);
+
+            const result = gila.Task.findTaskAndRead(blocked_task_id, io, &local_arena, gila_dir) catch |err| {
+                log.err("Failed to find or read blocked task {s}: {s}", .{ blocked_task_id, @errorName(err) });
+                continue;
+            };
+
+            if (result.task.status == .done or result.task.status == .cancelled) {
+                log.err("Cannot block task {s}: task is already {s}", .{ blocked_task_id, @tagName(result.task.status) });
+                continue;
+            }
+
+            if (result.task.status == .todo or result.task.status == .started) {
+                var blocked_task = result.task;
+
+                const new_entry: []u8 = local_arena.pushArray(u8, task_name.len + 6);
+                @memcpy(new_entry[0..3], "\"[[");
+                @memcpy(new_entry[3..][0..task_name.len], task_name);
+                @memcpy(new_entry[3 + task_name.len ..], "]]\"");
+
+                if (blocked_task.waiting_on) |waiting_on| {
+                    const new_list = local_arena.pushArray([]const u8, waiting_on.len + 1);
+                    for (waiting_on, 0..) |item, index| {
+                        new_list[index] = item;
+                    }
+                    new_list[waiting_on.len] = new_entry;
+                    blocked_task.waiting_on = new_list;
+                } else {
+                    const new_list = local_arena.pushArray([]const u8, 1);
+                    new_list[0] = new_entry;
+                    blocked_task.waiting_on = new_list;
+                }
+
+                blocked_task.transition(.waiting) catch |err| {
+                    log.err("Failed to transition task {s} to waiting: {s}", .{ blocked_task_id, @errorName(err) });
+                    continue;
+                };
+
+                common.moveTaskData(local_arena.allocator(), gila_dir, blocked_task_id, result.status, .waiting) catch |err| {
+                    log.err("Failed to move task {s} to waiting: {s}", .{ blocked_task_id, @errorName(err) });
+                    continue;
+                };
+
+                _ = blocked_task.toTaskFile(false, &local_arena, gila_dir) catch |err| {
+                    log.err("Failed to write task {s}: {s}", .{ blocked_task_id, @errorName(err) });
+                    continue;
+                };
+
+                log.info("Blocked task {s} is now waiting on {s}", .{ blocked_task_id, task_name });
+            }
+        }
+    }
 
     // @TODO make the default editor configurable
     if (self.edit) {

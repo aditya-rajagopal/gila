@@ -108,6 +108,7 @@ pub fn execute(self: Done, io: std.Io, arena: *stdx.Arena) void {
             log.err("Unexpected error while joining done/{s}: {s}", .{ self.positional.task, @errorName(err) });
             return;
         };
+
         log.debug("File path for editor: {s}", .{file_name});
         // @TODO make the default editor configurable
         const editor_name = std.process.getEnvVarOwned(allocator, "EDITOR") catch "vim";

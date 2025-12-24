@@ -153,6 +153,7 @@ pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
             if (task.waiting_on) |waiting_on| {
                 var new_array = std.ArrayList([]const u8).initCapacity(local_arena.allocator(), waiting_on.len) catch unreachable;
                 for (waiting_on) |name| {
+                    assert(name.len > 3);
                     const waiting_task = name[3 .. name.len - 3];
                     var found: bool = false;
                     var done: bool = false;

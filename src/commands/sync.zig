@@ -194,6 +194,7 @@ pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
                     continue;
                 }
             }
+            file.close();
 
             log.info("Task {s} is not waiting on anything", .{task_name});
             const target_status = switch (task.status) {
@@ -273,6 +274,8 @@ fn parseFolder(
             index += 1;
             continue;
         };
+
+        file.close();
 
         var error_out: ?[]const u8 = null;
         var changed: bool = false;

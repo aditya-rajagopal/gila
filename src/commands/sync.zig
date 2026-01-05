@@ -58,8 +58,8 @@ pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
         root.log_level = .warn;
     }
 
-    _, var gila_dir = common.getGilaDir(allocator) orelse return;
-    defer gila_dir.close();
+    _, var gila_dir = common.getGilaDir(io, allocator) orelse return;
+    defer gila_dir.close(io);
 
     const fixed_buffer: []u8 = allocator.alloc(u8, 128 * 1024) catch unreachable;
     var local_arena = stdx.Arena.initBuffer(fixed_buffer);
@@ -68,12 +68,12 @@ pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
     var transitions: Transitions = .empty;
 
     inline for (@typeInfo(TaskSets).@"struct".fields) |field| {
-        var dir_n: ?std.fs.Dir = gila_dir.openDir(field.name, .{ .iterate = true }) catch null;
+        var dir_n: ?std.Io.Dir = gila_dir.openDir(io, field.name, .{ .iterate = true }) catch null;
         if (dir_n) |*dir| {
             var map = TaskSet.init(allocator, &.{}, &.{}) catch unreachable;
-            defer dir.close();
+            defer dir.close(io);
             var dir_walker = dir.iterateAssumeFirstIteration();
-            while (dir_walker.next() catch |err| {
+            while (dir_walker.next(io) catch |err| {
                 log.err("Failed to iterate over done directory: {s}", .{@errorName(err)});
                 return;
             }) |entry| {
@@ -83,7 +83,7 @@ pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
                         var buffer: [1024]u8 = undefined;
                         const file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{entry.name}) catch unreachable;
                         const path = std.fs.path.join(local_arena.allocator(), &.{ entry.name, file_name }) catch unreachable;
-                        dir.access(path, .{}) catch continue;
+                        dir.access(io, path, .{}) catch continue;
                         const name = arena.pushString(entry.name);
                         map.put(arena.allocator(), name, {}) catch unreachable;
                     }
@@ -110,12 +110,12 @@ pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
     }
 
     if (maps.waiting) |*waiting_map| {
-        var dir: std.fs.Dir = gila_dir.openDir("waiting", .{}) catch {
+        var dir: std.Io.Dir = gila_dir.openDir(io, "waiting", .{}) catch {
             @branchHint(.cold);
             log.err("Unexpected error while opening 'waiting' directory", .{});
             return;
         };
-        defer dir.close();
+        defer dir.close(io);
         var index: usize = 0;
         while (index < waiting_map.keys().len) {
             defer local_arena.reset(false);
@@ -124,7 +124,7 @@ pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
             var buffer: [128]u8 = undefined;
             const file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{task_name}) catch unreachable;
             const path = std.fs.path.join(local_arena.allocator(), &.{ task_name, file_name }) catch unreachable;
-            const file = dir.openFile(path, .{ .mode = .read_write }) catch |err| {
+            const file = dir.openFile(io, path, .{ .mode = .read_write }) catch |err| {
                 log.err("Unexpected error while opening todo file {s}: {s}", .{ task_name, @errorName(err) });
                 index += 1;
                 continue;
@@ -185,7 +185,7 @@ pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
                     task.waiting_on = null;
                 } else if (new_array.items.len != waiting_on.len) {
                     task.waiting_on = new_array.toOwnedSlice(local_arena.allocator()) catch unreachable;
-                    task.flushToFile(file, file_name) catch {};
+                    task.flushToFile(io, file, file_name) catch {};
                     index += 1;
                     continue;
                 } else {
@@ -194,7 +194,7 @@ pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
                     continue;
                 }
             }
-            file.close();
+            file.close(io);
 
             log.info("Task {s} is not waiting on anything", .{task_name});
             const target_status = switch (task.status) {
@@ -202,7 +202,7 @@ pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
                 .done, .cancelled => |s| if (task.completed) |_| s else .todo,
                 .waiting => .todo,
             };
-            const result = moveTask(&local_arena, file_name, &task, .waiting, target_status, gila_dir);
+            const result = moveTask(io, &local_arena, file_name, &task, .waiting, target_status, gila_dir);
             switch (result) {
                 .err => {
                     index += 1;
@@ -230,7 +230,7 @@ pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
     }
 
     var buffer: [4096]u8 = undefined;
-    var writer = std.fs.File.stdout().writer(&buffer);
+    var writer = std.Io.File.stdout().writer(io, &buffer);
     var iter = transitions.iterator();
     while (iter.next()) |entry| {
         writer.interface.print("Moved {s}: {t} -> {t}\n", .{ entry.key_ptr.*, entry.value_ptr[0], entry.value_ptr[1] }) catch unreachable;
@@ -240,7 +240,7 @@ pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
 
 fn parseFolder(
     io: std.Io,
-    gila_dir: std.fs.Dir,
+    gila_dir: std.Io.Dir,
     folder: gila.Status,
     local_arena: *stdx.Arena,
     sets: *TaskSets,
@@ -248,12 +248,12 @@ fn parseFolder(
     arena: *stdx.Arena,
     transitions: *Transitions,
 ) !void {
-    var dir: std.fs.Dir = gila_dir.openDir(@tagName(folder), .{}) catch {
+    var dir: std.Io.Dir = gila_dir.openDir(io, @tagName(folder), .{}) catch {
         @branchHint(.cold);
         log.err("Unexpected error while opening '{s}' directory", .{@tagName(folder)});
         return;
     };
-    defer dir.close();
+    defer dir.close(io);
     var index: usize = 0;
     while (index < set.keys().len) {
         const task_name = set.keys()[index];
@@ -263,7 +263,7 @@ fn parseFolder(
         @memcpy(file_name[task_name.len..][0..3], ".md");
         const path = std.fs.path.join(local_arena.allocator(), &.{ task_name, file_name }) catch unreachable;
 
-        const file = dir.openFile(path, .{}) catch |err| {
+        const file = dir.openFile(io, path, .{}) catch |err| {
             log.err("Unexpected error while opening task file {s}: {s}", .{ task_name, @errorName(err) });
             index += 1;
             continue;
@@ -275,7 +275,7 @@ fn parseFolder(
             continue;
         };
 
-        file.close();
+        file.close(io);
 
         var error_out: ?[]const u8 = null;
         var changed: bool = false;
@@ -309,7 +309,7 @@ fn parseFolder(
             index += 1;
             log.info("Task '{s}' is in the same state as the folder. Skipping", .{task_name});
         } else {
-            const result = moveTask(local_arena, file_name, &task, folder, task.status, gila_dir);
+            const result = moveTask(io, local_arena, file_name, &task, folder, task.status, gila_dir);
             switch (result) {
                 .err => {
                     index += 1;
@@ -338,12 +338,13 @@ const Result = union(enum) {
 };
 
 fn moveTask(
+    io: std.Io,
     arena: *stdx.Arena,
     file_name: []const u8,
     task: *gila.Task,
     from: gila.Status,
     to: gila.Status,
-    gila_dir: std.fs.Dir,
+    gila_dir: std.Io.Dir,
 ) Result {
     const task_name = file_name[0 .. file_name.len - 3];
     log.info(
@@ -359,9 +360,9 @@ fn moveTask(
         };
     };
 
-    common.moveTaskData(arena.allocator(), gila_dir, task_name, from, task.status) catch return .err;
+    common.moveTaskData(io, arena.allocator(), gila_dir, task_name, from, task.status) catch return .err;
 
-    _ = task.toTaskFile(false, arena, gila_dir) catch return .err;
+    _ = task.toTaskFile(io, false, arena, gila_dir) catch return .err;
 
     log.info("Successfully moved task {s} to {s}", .{ task_name, @tagName(task.status) });
     return .{ .moved = task.status };

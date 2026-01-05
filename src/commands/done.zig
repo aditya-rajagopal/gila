@@ -52,8 +52,8 @@ pub fn execute(self: Done, io: std.Io, arena: *stdx.Arena) void {
         return;
     }
 
-    const gila_path, var gila_dir = common.getGilaDir(allocator) orelse return;
-    defer gila_dir.close();
+    const gila_path, var gila_dir = common.getGilaDir(io, allocator) orelse return;
+    defer gila_dir.close(io);
 
     var result = gila.Task.findTaskAndRead(self.positional.task, io, arena, gila_dir) catch return;
     var task = &result.task;
@@ -96,11 +96,11 @@ pub fn execute(self: Done, io: std.Io, arena: *stdx.Arena) void {
         },
     };
 
-    common.moveTaskData(allocator, gila_dir, self.positional.task, result.status, task.status) catch return;
+    common.moveTaskData(io, allocator, gila_dir, self.positional.task, result.status, task.status) catch return;
 
-    const file_path = task.toTaskFile(false, arena, gila_dir) catch return;
+    const file_path = task.toTaskFile(io, false, arena, gila_dir) catch return;
 
-    var stdout = std.fs.File.stdout().writer(&.{});
+    var stdout = std.Io.File.stdout().writer(io, &.{});
     stdout.interface.print("Successfully completed task {s}. Great success!\n", .{self.positional.task}) catch unreachable;
 
     if (self.edit) {
@@ -113,12 +113,12 @@ pub fn execute(self: Done, io: std.Io, arena: *stdx.Arena) void {
         // @TODO make the default editor configurable
         const editor_name = std.process.getEnvVarOwned(allocator, "EDITOR") catch "vim";
         var editor = std.process.Child.init(&.{ editor_name, "+", file_name }, std.heap.page_allocator);
-        editor.spawn() catch |err| {
+        editor.spawn(io) catch |err| {
             log.err("Failed to spawn editor {s}: {s}", .{ editor_name, @errorName(err) });
             return;
         };
         log.debug("Opened editor {s} at {f}", .{ editor_name, stdx.DateTimeUTC.now() });
-        const exit_code = editor.wait() catch |err| {
+        const exit_code = editor.wait(io) catch |err| {
             log.err("Failed to open editor: {s}", .{@errorName(err)});
             return;
         };

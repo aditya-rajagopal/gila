@@ -210,13 +210,13 @@ pub const FindAndReadResult = struct {
 };
 /// Returns the folder status of the task. The slices in task point to a buffer allocated on the arena.
 /// It is expected that the arena lifetime is atleast as long as you want the Task to exist.
-pub fn findTaskAndRead(id: []const u8, io: std.Io, arena: *stdx.Arena, gila_dir: std.fs.Dir) error{Failed}!FindAndReadResult {
+pub fn findTaskAndRead(id: []const u8, io: std.Io, arena: *stdx.Arena, gila_dir: std.Io.Dir) error{Failed}!FindAndReadResult {
     var task = Task.init(id) catch {
         log.err("Invalid task_id `{s}` a task is of the form word_word_ccc", .{id});
         return error.Failed;
     };
 
-    var result = getTaskFileById(task.id, arena, gila_dir) catch |err| switch (err) {
+    var result = getTaskFileById(io, task.id, arena, gila_dir) catch |err| switch (err) {
         error.TaskNotFound => {
             log.err("Task {s} does not exist in gila directory", .{task.id});
             return error.Failed;
@@ -226,7 +226,7 @@ pub fn findTaskAndRead(id: []const u8, io: std.Io, arena: *stdx.Arena, gila_dir:
             return error.Failed;
         },
     };
-    defer result.fd.close();
+    defer result.fd.close(io);
 
     try task.fromFile(result.fd, io, arena);
 
@@ -240,7 +240,7 @@ pub fn findTaskAndRead(id: []const u8, io: std.Io, arena: *stdx.Arena, gila_dir:
     return .{ .task = task, .status = result.folder };
 }
 
-pub fn fromFile(self: *Task, task_file: std.fs.File, io: std.Io, arena: *stdx.Arena) error{Failed}!void {
+pub fn fromFile(self: *Task, task_file: std.Io.File, io: std.Io, arena: *stdx.Arena) error{Failed}!void {
     var buffer: [4096]u8 = undefined;
     var reader = task_file.reader(io, &buffer);
     reader.interface.fillMore() catch {
@@ -258,10 +258,10 @@ pub fn fromFile(self: *Task, task_file: std.fs.File, io: std.Io, arena: *stdx.Ar
 
 const FindError = error{TaskNotFound} || std.Io.File.OpenError;
 pub const FindResult = struct {
-    fd: std.fs.File,
+    fd: std.Io.File,
     folder: gila.Status,
 };
-pub fn getTaskFileById(id: []const u8, arena: *stdx.Arena, gila_dir: std.fs.Dir) FindError!FindResult {
+pub fn getTaskFileById(io: std.Io, id: []const u8, arena: *stdx.Arena, gila_dir: std.Io.Dir) FindError!FindResult {
     var buffer: [128]u8 = undefined;
     const task_file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{id}) catch unreachable;
 
@@ -275,7 +275,7 @@ pub fn getTaskFileById(id: []const u8, arena: *stdx.Arena, gila_dir: std.fs.Dir)
         result: {
             const name = std.fs.path.join(allocator, &.{ field.name, id, task_file_name }) catch unreachable;
 
-            const file = gila_dir.openFile(name, .{ .mode = .read_only }) catch |err| switch (err) {
+            const file = gila_dir.openFile(io, name, .{ .mode = .read_only }) catch |err| switch (err) {
                 error.FileNotFound => {
                     log.debug("Task {s} does not exist in {s} directory", .{ id, name });
                     break :result;
@@ -292,7 +292,7 @@ pub fn getTaskFileById(id: []const u8, arena: *stdx.Arena, gila_dir: std.fs.Dir)
     return error.TaskNotFound;
 }
 
-pub fn toTaskFile(self: *const Task, make_new: bool, arena: *stdx.Arena, gila_dir: std.fs.Dir) error{Invalid}![]u8 {
+pub fn toTaskFile(self: *const Task, io: std.Io, make_new: bool, arena: *stdx.Arena, gila_dir: std.Io.Dir) error{Invalid}![]u8 {
     if (!gila.id.isValid(self.id)) {
         log.err("Invalid task_id `{s}` a task is of the form word_word_ccc", .{self.id});
         return error.Invalid;
@@ -303,7 +303,7 @@ pub fn toTaskFile(self: *const Task, make_new: bool, arena: *stdx.Arena, gila_di
     const path_description_file = std.fs.path.join(arena.allocator(), &.{ @tagName(self.status), self.id, file_name_md }) catch unreachable;
 
     var found_file: bool = true;
-    const file = gila_dir.openFile(path_description_file, .{ .mode = .write_only }) catch |err| switch (err) {
+    const file = gila_dir.openFile(io, path_description_file, .{ .mode = .write_only }) catch |err| switch (err) {
         error.FileNotFound => blk: {
             if (!make_new) {
                 log.err("Task {s} does not exist in gila directory", .{self.id});
@@ -312,13 +312,13 @@ pub fn toTaskFile(self: *const Task, make_new: bool, arena: *stdx.Arena, gila_di
             found_file = false;
 
             const task_dir_name = std.fs.path.join(arena.allocator(), &.{ @tagName(self.status), self.id }) catch unreachable;
-            gila_dir.makePath(task_dir_name) catch |e| {
+            gila_dir.createDirPath(io, task_dir_name) catch |e| {
                 log.err("Failed to create task directory {s}: {s}", .{ self.id, @errorName(e) });
                 return error.Invalid;
             };
             log.info("Successfully created task directory {s}", .{task_dir_name});
 
-            const description_file = gila_dir.createFile(path_description_file, .{}) catch |e| {
+            const description_file = gila_dir.createFile(io, path_description_file, .{}) catch |e| {
                 log.err("Failed to create {s}.md file: {s}", .{ self.id, @errorName(e) });
                 return error.Invalid;
             };
@@ -330,26 +330,26 @@ pub fn toTaskFile(self: *const Task, make_new: bool, arena: *stdx.Arena, gila_di
             return error.Invalid;
         },
     };
-    defer file.close();
+    defer file.close(io);
 
     if (found_file and make_new) {
         log.err("Task {s} already exists. If you want to create a new task you can wait for 1 second and try again.", .{self.id});
         return error.Invalid;
     }
 
-    self.flushToFile(file, path_description_file) catch return error.Invalid;
+    self.flushToFile(io, file, path_description_file) catch return error.Invalid;
 
     return path_description_file;
 }
 
-pub fn flushToFile(self: *const Task, file: std.fs.File, file_path: []const u8) error{Invalid}!void {
-    file.setEndPos(0) catch |err| {
+pub fn flushToFile(self: *const Task, io: std.Io, file: std.Io.File, file_path: []const u8) error{Invalid}!void {
+    file.setLength(io, 0) catch |err| {
         log.err("Failed to set end position of done file {s}: {s}", .{ file_path, @errorName(err) });
         return error.Invalid;
     };
 
     var write_buffer: [4096]u8 align(16) = undefined;
-    var file_writer = file.writer(&write_buffer);
+    var file_writer = file.writer(io, &write_buffer);
     const writer = &file_writer.interface;
 
     writer.print("{f}", .{self.*}) catch |err| {
@@ -361,7 +361,7 @@ pub fn flushToFile(self: *const Task, file: std.fs.File, file_path: []const u8) 
         log.err("Failed to flush {s}.md: {s}", .{ self.id, @errorName(err) });
         return error.Invalid;
     };
-    file.sync() catch |err| {
+    file.sync(io) catch |err| {
         log.err("Failed to sync {s}.md: {s}", .{ self.id, @errorName(err) });
         return error.Invalid;
     };

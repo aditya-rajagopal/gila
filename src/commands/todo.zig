@@ -79,8 +79,8 @@ pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
         root.log_level = .warn;
     }
 
-    const gila_path, var gila_dir = common.getGilaDir(allocator) orelse return;
-    defer gila_dir.close();
+    const gila_path, var gila_dir = common.getGilaDir(io, allocator) orelse return;
+    defer gila_dir.close(io);
 
     const task_name = gila.id.new(allocator) catch |err| {
         log.err("Failed to get create task id: {s}", .{@errorName(err)});
@@ -115,7 +115,7 @@ pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
         return;
     };
 
-    const description_file = task.toTaskFile(true, arena, gila_dir) catch return;
+    const description_file = task.toTaskFile(io, true, arena, gila_dir) catch return;
 
     if (self.blocks) |blocks| {
         const fixed_buffer: []u8 = arena.pushArray(u8, 128 * 1024);
@@ -159,12 +159,12 @@ pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
                     continue;
                 };
 
-                common.moveTaskData(local_arena.allocator(), gila_dir, blocked_task_id, result.status, .waiting) catch |err| {
+                common.moveTaskData(io, local_arena.allocator(), gila_dir, blocked_task_id, result.status, .waiting) catch |err| {
                     log.err("Failed to move task {s} to waiting: {s}", .{ blocked_task_id, @errorName(err) });
                     continue;
                 };
 
-                _ = blocked_task.toTaskFile(false, &local_arena, gila_dir) catch |err| {
+                _ = blocked_task.toTaskFile(io, false, &local_arena, gila_dir) catch |err| {
                     log.err("Failed to write task {s}: {s}", .{ blocked_task_id, @errorName(err) });
                     continue;
                 };
@@ -183,19 +183,19 @@ pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
             return;
         };
         var editor = std.process.Child.init(&.{ editor_name, "+", file_name }, std.heap.page_allocator);
-        editor.spawn() catch |err| {
+        editor.spawn(io) catch |err| {
             log.err("Failed to spawn editor {s}: {s}", .{ editor_name, @errorName(err) });
             return;
         };
         log.debug("Opened editor {s} at {f}", .{ editor_name, stdx.DateTimeUTC.now() });
-        const exit_code = editor.wait() catch |err| {
+        const exit_code = editor.wait(io) catch |err| {
             log.err("Failed to open editor: {s}", .{@errorName(err)});
             return;
         };
         log.debug("Editor exited with code {any} at {f}", .{ exit_code, stdx.DateTimeUTC.now() });
     }
 
-    var stdout = std.fs.File.stdout().writer(&.{});
+    var stdout = std.Io.File.stdout().writer(io, &.{});
     stdout.interface.print("New task created: {s}\n", .{task_name}) catch unreachable;
     return;
 }

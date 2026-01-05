@@ -36,7 +36,6 @@ pub const help =
 ;
 
 pub fn execute(self: @This(), io: std.Io, arena: *stdx.Arena) void {
-    _ = io;
     if (!self.verbose) {
         root.log_level = .warn;
     }
@@ -56,15 +55,15 @@ pub fn execute(self: @This(), io: std.Io, arena: *stdx.Arena) void {
         }
     }
 
-    var dir = std.fs.openDirAbsolute(current_dir, .{ .iterate = true }) catch |err| {
+    var dir = std.Io.Dir.openDirAbsolute(io, current_dir, .{ .iterate = true }) catch |err| {
         log.err("Failed to open current directory {s}: {s}", .{ current_dir, @errorName(err) });
         return;
     };
-    defer dir.close();
+    defer dir.close(io);
 
     std.log.info("Opened directory {s}", .{current_dir});
 
-    dir.makeDir(gila.dir_name) catch |err| {
+    dir.createDir(io, gila.dir_name, .default_dir) catch |err| {
         switch (err) {
             error.PathAlreadyExists => {
                 log.err("Reinitializing existing GILA project: {s}/{s}", .{ current_dir, gila.dir_name });
@@ -77,7 +76,7 @@ pub fn execute(self: @This(), io: std.Io, arena: *stdx.Arena) void {
         }
     };
     defer {
-        var stdout = std.fs.File.stdout().writer(&.{});
+        var stdout = std.Io.File.stdout().writer(io, &.{});
         stdout.interface.print("Initialized GILA project: {s}/{s}\n", .{ current_dir, gila.dir_name }) catch unreachable;
     }
 
@@ -85,13 +84,13 @@ pub fn execute(self: @This(), io: std.Io, arena: *stdx.Arena) void {
         return;
     }
     const gila_dir_name = std.fs.path.join(allocator, &.{ current_dir, gila.dir_name }) catch unreachable;
-    var gila_dir = std.fs.openDirAbsolute(gila_dir_name, .{ .iterate = true }) catch |err| {
+    var gila_dir = std.Io.Dir.openDirAbsolute(io, gila_dir_name, .{ .iterate = true }) catch |err| {
         log.err("Failed to open .gila directory {s}/{s}: {s}", .{ current_dir, gila.dir_name, @errorName(err) });
         return;
     };
-    defer gila_dir.close();
+    defer gila_dir.close(io);
 
-    gila_dir.makeDir("todo") catch |err| {
+    gila_dir.createDir(io, "todo", .default_dir) catch |err| {
         log.err("Unexpected error while creating todo folder: {s}", .{@errorName(err)});
         unreachable;
     };

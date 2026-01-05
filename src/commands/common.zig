@@ -11,7 +11,7 @@ pub fn getUserName(gpa: std.mem.Allocator) ![]const u8 {
     return std.process.getEnvVarOwned(gpa, user_env);
 }
 
-pub fn moveTaskData(allocator: std.mem.Allocator, gila_dir: std.fs.Dir, task_name: []const u8, from: gila.Status, to: gila.Status) !void {
+pub fn moveTaskData(io: std.Io, allocator: std.mem.Allocator, gila_dir: std.Io.Dir, task_name: []const u8, from: gila.Status, to: gila.Status) !void {
     if (from == to) return;
     const from_folder = std.fs.path.join(allocator, &.{ @tagName(from), task_name }) catch |err| {
         log.err("Unexpected error while joining {s}/{s}: {s}", .{ @tagName(from), task_name, @errorName(err) });
@@ -21,20 +21,21 @@ pub fn moveTaskData(allocator: std.mem.Allocator, gila_dir: std.fs.Dir, task_nam
         log.err("Unexpected error while joining {s}/{s}: {s}", .{ @tagName(to), task_name, @errorName(err) });
         return;
     };
-    gila_dir.makePath(@tagName(to)) catch |err| {
+    // @TODO is this create needed?
+    gila_dir.createDirPath(io, to_folder) catch |err| {
         log.err("Failed to create directory {s}: {s}", .{ @tagName(to), @errorName(err) });
         return;
     };
-    gila_dir.rename(from_folder, to_folder) catch |err| {
+    gila_dir.rename(from_folder, gila_dir, to_folder, io) catch |err| {
         log.err("Failed to move task {s} from {s} to {s}: {s}", .{ task_name, @tagName(from), @tagName(to), @errorName(err) });
     };
     log.info("Successfully moved task folder along with all artifacts {s} from {s} to {s}", .{ task_name, @tagName(from), @tagName(to) });
 }
 
-pub fn getGilaDir(gpa: std.mem.Allocator) ?struct { []const u8, std.fs.Dir } {
-    const gila_path = std.fs.path.join(gpa, &.{ searchForGilaDir(gpa) orelse return null, gila.dir_name }) catch unreachable;
+pub fn getGilaDir(io: std.Io, gpa: std.mem.Allocator) ?struct { []const u8, std.Io.Dir } {
+    const gila_path = std.fs.path.join(gpa, &.{ searchForGilaDir(io, gpa) orelse return null, gila.dir_name }) catch unreachable;
 
-    const gila_dir = std.fs.openDirAbsolute(gila_path, .{}) catch |err| {
+    const gila_dir = std.Io.Dir.openDirAbsolute(io, gila_path, .{}) catch |err| {
         log.err("Failed to open .gila directory {s}: {s}", .{ gila_path, @errorName(err) });
         return null;
     };
@@ -42,7 +43,7 @@ pub fn getGilaDir(gpa: std.mem.Allocator) ?struct { []const u8, std.fs.Dir } {
     return .{ gila_path, gila_dir };
 }
 
-pub fn searchForGilaDir(gpa: std.mem.Allocator) ?[]const u8 {
+pub fn searchForGilaDir(io: std.Io, gpa: std.mem.Allocator) ?[]const u8 {
     const pwd: []const u8 = std.process.getCwdAlloc(gpa) catch |err| {
         log.err("Failed to get current directory: {s}", .{@errorName(err)});
         return null;
@@ -51,14 +52,14 @@ pub fn searchForGilaDir(gpa: std.mem.Allocator) ?[]const u8 {
     var current_dir: []const u8 = pwd;
 
     outter_loop: for (0..128) |_| {
-        var dir = std.fs.openDirAbsolute(current_dir, .{ .iterate = true }) catch |err| {
+        var dir = std.Io.Dir.openDirAbsolute(io, current_dir, .{ .iterate = true }) catch |err| {
             log.err("Failed to open current directory: {s}", .{@errorName(err)});
             return null;
         };
-        defer dir.close();
+        defer dir.close(io);
 
         var dir_walker = dir.iterateAssumeFirstIteration();
-        while (dir_walker.next() catch |err| {
+        while (dir_walker.next(io) catch |err| {
             log.err("Failed to iterate directory {s}: {s}", .{ current_dir, @errorName(err) });
             return null;
         }) |entry| {

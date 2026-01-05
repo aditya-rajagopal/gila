@@ -43,24 +43,26 @@ pub fn logFn(
     const scope_prefix = "(" ++ @tagName(scope) ++ "): ";
 
     var buffer: [128]u8 = undefined;
-    const stderr, const ttyconf = std.debug.lockStderrWriter(&buffer);
-    defer std.debug.unlockStderrWriter();
-    ttyconf.setColor(stderr, switch (level) {
+    const stderr_lock = std.debug.lockStderr(&buffer);
+    defer std.debug.unlockStderr();
+    const ttyconf = stderr_lock.terminal();
+    var stderr = &stderr_lock.file_writer.interface;
+    ttyconf.setColor(switch (level) {
         .err => .red,
         .warn => .yellow,
         .info => .green,
         .debug => .magenta,
     }) catch {};
-    ttyconf.setColor(stderr, .bold) catch {};
-    ttyconf.setColor(stderr, .bold) catch {};
+    ttyconf.setColor(.bold) catch {};
+    ttyconf.setColor(.bold) catch {};
     stderr.writeAll(level_text) catch return;
-    ttyconf.setColor(stderr, .reset) catch {};
-    ttyconf.setColor(stderr, .dim) catch {};
-    ttyconf.setColor(stderr, .bold) catch {};
+    ttyconf.setColor(.reset) catch {};
+    ttyconf.setColor(.dim) catch {};
+    ttyconf.setColor(.bold) catch {};
     if (scope != .default) {
         stderr.writeAll(scope_prefix) catch return;
     }
-    ttyconf.setColor(stderr, .reset) catch {};
+    ttyconf.setColor(.reset) catch {};
     stderr.print(format ++ "\n", args) catch return;
 }
 
@@ -116,16 +118,16 @@ pub fn main() void {
     var stack_space: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&stack_space);
 
+    var threaded = std.Io.Threaded.init_single_threaded;
+    const io = threaded.ioBasic();
+
     var args = std.process.argsWithAllocator(arena.allocator()) catch |err| {
         var stderr = std.fs.File.stderr().writer(&.{});
         stderr.interface.print("Failed to get args: {s}\n", .{@errorName(err)}) catch unreachable;
         return;
     };
 
-    const cli = flags.parseArgs(arena.allocator(), &args, CLIArgs);
-
-    var threaded = std.Io.Threaded.init_single_threaded;
-    const io = threaded.ioBasic();
+    const cli = flags.parseArgs(io, arena.allocator(), &args, CLIArgs);
 
     switch (cli) {
         .init => |init| init.execute(io, &arena),
@@ -134,9 +136,9 @@ pub fn main() void {
         .sync => |sync| sync.execute(io, &arena),
         .tui => |tui| tui.execute(io, &arena),
         .version => {
-            var stdout = std.fs.File.stdout().writer(&.{});
+            var stdout = std.Io.File.stdout().writer(io, &.{});
             stdout.interface.print("v{s}\n", .{zon.version}) catch |err| {
-                var stderr = std.fs.File.stderr().writer(&.{});
+                var stderr = std.Io.File.stderr().writer(io, &.{});
                 stderr.interface.print("Failed to write to stdout: {s}", .{@errorName(err)}) catch unreachable;
             };
         },

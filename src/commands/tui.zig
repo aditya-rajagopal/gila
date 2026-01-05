@@ -144,6 +144,7 @@ pub const Event = union(enum) {
 
     pub const KeyEvent = struct {
         code: Code,
+        physical_key: Code,
         mods: Mods,
 
         pub fn format(self: KeyEvent, writer: *std.Io.Writer) std.Io.Writer.Error!void {
@@ -166,6 +167,28 @@ pub const Event = union(enum) {
             }
         }
 
+        pub fn parseAscii(c: u8) KeyEvent {
+            // @TODO [[infamous_goose_483]]
+            switch (c) {
+                9 => return .{ .code = .tab, .mods = .{}, .physical_key = .tab },
+                127 => return .{ .code = .backspace, .mods = .{}, .physical_key = .backspace },
+                27 => return .{ .code = .escape, .mods = .{}, .physical_key = .escape },
+                1...8, 11, 12, 14...26 => |ctrl| {
+                    return .{ .code = @enumFromInt(ctrl - 1 + 'a'), .mods = .{ .ctrl = true }, .physical_key = @enumFromInt(ctrl - 1 + 'a') };
+                },
+                10 => return .{ .code = @enumFromInt('j'), .mods = .{ .ctrl = true }, .physical_key = @enumFromInt('j') },
+                13 => return .{ .code = .enter, .mods = .{}, .physical_key = .enter },
+                0 => return .{ .code = @enumFromInt('@'), .mods = .{ .ctrl = true }, .physical_key = @enumFromInt('@') },
+                'a'...'z' => {
+                    return .{ .code = @enumFromInt(c), .mods = .{}, .physical_key = @enumFromInt(c - 'a' + 'A') };
+                },
+                'A'...'Z' => {
+                    return .{ .code = @enumFromInt(c), .mods = .{ .shift = true }, .physical_key = @enumFromInt(c) };
+                },
+                else => return .{ .code = @enumFromInt(c), .mods = .{}, .physical_key = @enumFromInt(c) },
+            }
+        }
+
         pub const Code = enum(u21) {
             tab = 0x09,
             enter = 0x0d,
@@ -178,9 +201,10 @@ pub const Event = union(enum) {
 };
 
 pub const Terminal = struct {
-    fd: std.fs.File.Handle,
+    fd: std.Io.File.Handle,
+    stdin: std.Io.File.Handle,
     original_state: std.posix.termios,
-    writer: std.fs.File.Writer,
+    writer: std.Io.File.Writer,
     buffer: [1024]u8,
     alt_screen: bool = false,
     size: Size,
@@ -189,11 +213,12 @@ pub const Terminal = struct {
 
     pub const Size = struct { width: u16, height: u16 };
 
-    pub fn init() error{Failed}!Terminal {
+    pub fn init(io: std.Io) error{Failed}!Terminal {
         var terminal: Terminal = undefined;
         terminal.fd = std.posix.open("/dev/tty", .{ .ACCMODE = .RDWR }, 0) catch return error.Failed;
+        terminal.stdin = std.Io.File.stdin().handle;
         terminal.original_state = std.posix.tcgetattr(terminal.fd) catch return error.Failed;
-        terminal.writer = std.fs.File.Writer.initStreaming(std.fs.File{ .handle = terminal.fd }, &terminal.buffer);
+        terminal.writer = std.Io.File.Writer.initStreaming(std.Io.File{ .handle = terminal.fd }, io, &terminal.buffer);
         terminal.alt_screen = false;
         terminal.size = terminal.getSize();
         terminal.mouse_enabled = null;
@@ -280,7 +305,7 @@ pub const Terminal = struct {
     }
 
     pub fn setCursorPosition(self: *Terminal, x: u16, y: u16) error{WriteFailed}!void {
-        try self.write("\x1b[{d};{d}H", .{ y + 1, x + 1 });
+        try self.print("\x1b[{d};{d}H", .{ y + 1, x + 1 });
     }
 
     pub fn setCursorVisible(self: *Terminal, visible: bool) error{WriteFailed}!void {
@@ -379,29 +404,29 @@ pub const Terminal = struct {
         if (dy > 0) try self.write("\x1b[{d}B", .{dy}) else try self.write("\x1b[{d}A", .{-dy});
     }
 
-    pub fn pollEvents(self: *Terminal) error{PollFailed}![]Event {
+    pub fn pollEvents(self: *Terminal, timeout_ms: i32) error{PollFailed}![]Event {
         var events = std.ArrayList(Event).initBuffer(&self.event_queue);
 
         const size = self.getSize();
         if (size.width != self.size.width or size.height != self.size.height) {
-            self.size = size;
             events.appendAssumeCapacity(.{ .resize = .{
                 .old_width = self.size.width,
                 .old_height = self.size.height,
                 .width = size.width,
                 .height = size.height,
             } });
+            self.size = size;
         }
 
         var fds = [_]std.posix.pollfd{
             .{
-                .fd = std.fs.File.stdin().handle,
+                .fd = self.stdin,
                 .events = std.posix.POLL.IN,
                 .revents = 0,
             },
         };
 
-        const poll_result = std.posix.poll(&fds, 1000) catch return error.PollFailed;
+        const poll_result = std.posix.poll(&fds, timeout_ms) catch return error.PollFailed;
 
         if (poll_result == 0) {
             // Timeout
@@ -415,35 +440,39 @@ pub const Terminal = struct {
         var buf: [32]u8 = undefined;
         const n = std.posix.read(self.fd, &buf) catch return error.PollFailed;
 
-        self.print("Stdin: {any}\r\n", .{buf[0..n]}) catch {};
-        self.flush() catch {};
-
+        // @TODO [[minty_core_jw2]]
         if (n == 0) {
             return events.items;
         }
+
         if (n == 1) {
-            events.appendAssumeCapacity(readAscii(buf[0]));
+            events.appendAssumeCapacity(.{ .key = Event.KeyEvent.parseAscii(buf[0]) });
         } else if (buf[0] == 27) {
             if (n == 2) {
-                const c = buf[1];
-                var event = readAscii(c);
-                event.key.mods.alt = true;
-                events.appendAssumeCapacity(event);
+                var key_event = Event.KeyEvent.parseAscii(buf[1]);
+                key_event.mods.alt = true;
+                events.appendAssumeCapacity(.{ .key = key_event });
             }
-            if (n > 3) {
-                if (self.mouse_enabled) |options| {
-                    if (options.sgr) {
-                        if (buf[1] == '[' and buf[2] == '<') {
-                            events.appendAssumeCapacity(.{ .mouse = Event.MouseEvent.parse(buf[0..n]) catch {
-                                return events.items;
-                            } });
-                        }
-                    }
-                }
+            if (n > 3) blk: {
+                if (self.tryParseMouseEvent(buf[0..n], &events) catch return events.items) break :blk;
             }
         }
 
         return events.items;
+    }
+
+    fn tryParseMouseEvent(self: *Terminal, data: []const u8, events: *std.ArrayList(Event)) error{Invalid}!bool {
+        if (self.mouse_enabled) |options| {
+            if (options.sgr) {
+                if (data[1] != '[') return false;
+                if (data[2] != '<') return false;
+                events.appendAssumeCapacity(.{ .mouse = Event.MouseEvent.parse(data) catch return error.Invalid });
+                return true;
+            } else {
+                assert(false and "TODO: Implement mouse events without SGR");
+            }
+        }
+        return false;
     }
 };
 
@@ -459,10 +488,9 @@ pub fn cutScalar(comptime T: type, haystack: []const T, needle: T) ?struct { []c
 
 pub fn execute(self: Tui, io: std.Io, arena: *stdx.Arena) void {
     _ = self;
-    _ = io;
     _ = arena;
 
-    var terminal = Terminal.init() catch |err| {
+    var terminal = Terminal.init(io) catch |err| {
         log.err("Failed to initialize terminal: {s}", .{@errorName(err)});
         return;
     };
@@ -487,58 +515,65 @@ pub fn execute(self: Tui, io: std.Io, arena: *stdx.Arena) void {
 
     var i: usize = 0;
     var quit = false;
+    var current_x: u16 = terminal.size.width / 3;
+    var current_y: u16 = terminal.size.height / 2;
+
     event: while (!quit) {
         terminal.clearScreen() catch {};
-        const events = terminal.pollEvents() catch {
+        const events = terminal.pollEvents(100) catch {
             log.err("Failed to poll events", .{});
             return;
         };
         i += 1;
-        terminal.print("Events : {any}\r\n", .{events}) catch return;
+        terminal.setCursorPosition(current_x, current_y) catch {};
+        terminal.print("Events : {any}\n", .{events}) catch return;
 
         const cursor = terminal.getCursorPosition();
-        terminal.print("Cursor position: {d}x{d}\r\n", .{ cursor.x, cursor.y }) catch return;
-        terminal.print("Window size: {d}x{d}\r\n", .{ terminal.size.width, terminal.size.height }) catch return;
-        terminal.print("Hello World! : {d}\r\n", .{i}) catch return;
+        terminal.setCursorPosition(current_x, current_y + 1) catch {};
+        terminal.print("Cursor position: {d}x{d}\n", .{ cursor.x, cursor.y }) catch return;
+        terminal.setCursorPosition(current_x, current_y + 2) catch {};
+        terminal.print("Window size: {d}x{d}\n", .{ terminal.size.width, terminal.size.height }) catch return;
+        terminal.setCursorPosition(current_x, current_y + 3) catch {};
+        terminal.print("Hello World! : {d}\n", .{i}) catch return;
 
-        for (events) |event| switch (event) {
-            .key => |key| {
-                terminal.print("{f}\r\n", .{key}) catch return;
-                if (key.code == @as(Event.KeyEvent.Code, @enumFromInt('Q'))) {
-                    quit = true;
-                    break :event;
-                }
-            },
-            .mouse => |mouse| {
-                terminal.print("{f}\r\n", .{mouse}) catch return;
-            },
-            .resize => |resize| {
-                terminal.print("Resized to {d}x{d}\r\n", .{ resize.width, resize.height }) catch return;
-            },
-            else => unreachable,
-        };
+        for (events, 0..) |event, index| {
+            terminal.setCursorPosition(current_x, current_y + 4 + @as(u16, @truncate(index))) catch {};
+            switch (event) {
+                .key => |key| {
+                    terminal.print("{f}\n", .{key}) catch return;
+                    if (key.physical_key == @as(Event.KeyEvent.Code, @enumFromInt('Q'))) {
+                        quit = true;
+                        break :event;
+                    }
+                },
+                .mouse => |mouse| {
+                    terminal.print("{f}\n", .{mouse}) catch return;
+                    if (mouse == .left_pressed) {
+                        current_x = mouse.left_pressed.x;
+                        current_y = mouse.left_pressed.y;
+                    }
+                },
+                .resize => |resize| {
+                    terminal.print("Starting at {d}x{d}", .{ current_x, current_y }) catch return;
+                    current_x = (resize.width * current_x) / resize.old_width;
+                    current_y = (resize.height * current_y) / resize.old_height;
+                    terminal.print("Ending at {d}x{d}\n", .{ current_x, current_y }) catch return;
+                },
+                else => unreachable,
+            }
+        }
 
         terminal.flush() catch return;
     }
 }
 
-pub fn readAscii(c: u8) Event {
-    switch (c) {
-        9 => return .{ .key = .{ .code = .tab, .mods = .{} } },
-        127 => return .{ .key = .{ .code = .backspace, .mods = .{} } },
-        27 => return .{ .key = .{ .code = .escape, .mods = .{} } },
-        1...8, 11, 12, 14...26 => |ctrl| {
-            return .{ .key = .{ .code = @enumFromInt(ctrl - 1 + 'a'), .mods = .{ .ctrl = true } } };
-        },
-        10 => return .{ .key = .{ .code = @enumFromInt('j'), .mods = .{ .ctrl = true } } },
-        13 => return .{ .key = .{ .code = .enter, .mods = .{} } },
-        0 => return .{ .key = .{ .code = @enumFromInt('@'), .mods = .{ .ctrl = true } } },
-        'a'...'z' => {
-            return .{ .key = .{ .code = @enumFromInt(c), .mods = .{} } };
-        },
-        'A'...'Z' => {
-            return .{ .key = .{ .code = @enumFromInt(c), .mods = .{ .shift = true } } };
-        },
-        else => return .{ .key = .{ .code = @enumFromInt(c), .mods = .{} } },
-    }
+pub fn divIntToFloat(comptime Float: type, numerator: anytype, denominator: anytype) Float {
+    const NType = @TypeOf(numerator);
+    const DType = @TypeOf(denominator);
+    comptime assert(@typeInfo(NType) == .int or @typeInfo(NType) == .float);
+    comptime assert(@typeInfo(DType) == .int or @typeInfo(DType) == .float);
+    comptime assert(@typeInfo(Float) == .float);
+    const n: Float = if (comptime @typeInfo(NType) == .int) @floatFromInt(numerator) else @floatCast(numerator);
+    const d: Float = if (comptime @typeInfo(DType) == .int) @floatFromInt(denominator) else @floatCast(denominator);
+    return n / d;
 }

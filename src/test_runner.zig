@@ -11,7 +11,10 @@ pub fn main() anyerror!void {
     var skipped: u64 = 0;
     var failed: u64 = 0;
 
-    var writer = std.fs.File.stdout().writer(&.{});
+    var threaded = std.Io.Threaded.init_single_threaded;
+    const io = threaded.ioBasic();
+
+    var writer = std.Io.File.stdout().writer(io, &.{});
     const stdout = &writer.interface;
 
     for (builtin.test_functions) |test_fn| {

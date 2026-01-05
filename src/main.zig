@@ -11,6 +11,7 @@ const Todo = @import("commands/todo.zig");
 const Init = @import("commands/init.zig");
 const Done = @import("commands/done.zig");
 const Sync = @import("commands/sync.zig");
+const Tui = @import("commands/tui.zig");
 
 pub const std_options: std.Options = .{
     .log_level = default_log_level,
@@ -68,6 +69,7 @@ const CLIArgs = union(enum) {
     todo: Todo,
     done: Done,
     sync: Sync,
+    tui: Tui,
     version,
 
     pub const help =
@@ -130,6 +132,7 @@ pub fn main() void {
         .todo => |todo| todo.execute(io, &arena),
         .done => |done| done.execute(io, &arena),
         .sync => |sync| sync.execute(io, &arena),
+        .tui => |tui| tui.execute(io, &arena),
         .version => {
             var stdout = std.fs.File.stdout().writer(&.{});
             stdout.interface.print("v{s}\n", .{zon.version}) catch |err| {

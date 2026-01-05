@@ -711,5 +711,5 @@ test "Task.parse" {
     try std.testing.expectEqualStrings(expected_write, writer.buffered());
 
     var error_out: ?[]const u8 = null;
-    try task.validate(&error_out);
+    try std.testing.expectError(error.WaitingFoundButAllValid, task.validate(&error_out));
 }

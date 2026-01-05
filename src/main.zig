@@ -12,6 +12,7 @@ const Init = @import("commands/init.zig");
 const Done = @import("commands/done.zig");
 const Sync = @import("commands/sync.zig");
 const Tui = @import("commands/tui.zig");
+const Find = @import("commands/find.zig");
 
 pub const std_options: std.Options = .{
     .log_level = default_log_level,
@@ -72,6 +73,7 @@ const CLIArgs = union(enum) {
     done: Done,
     sync: Sync,
     tui: Tui,
+    find: Find,
     version,
 
     pub const help =
@@ -92,6 +94,9 @@ const CLIArgs = union(enum) {
         \\
         \\    gila sync [-h | --help] [--verbose]
         \\
+        \\    gila find [--priority=low|medium|high|urgent] [--tags="<[or|and]:><tag1>,<tag2>,..."]
+        \\              [--waiting-on="<[or|and]:><task1>,<task2>,..."] [--verbose]
+        \\
         \\Commands:
         \\    version   Prints the version of the GILA CLI.
         \\    init      Initializes a new GILA project in the current directory or the specified directory.
@@ -100,6 +105,7 @@ const CLIArgs = union(enum) {
         \\    tag       Add tags to a task.
         \\    sync      Synchronizes the tasks in the gila directory by analyzing the tasks and moving them to their appropriate folders
         \\              and modifies necessary properties.
+        \\    find      Find tasks that match the given priority, tags and/or waiting_on list.
         \\
         \\Options:
         \\    -h, --help
@@ -110,6 +116,7 @@ const CLIArgs = union(enum) {
         \\    gila todo --priority=low --priority-value=50 --description="This is a description" 'Title of the task'
         \\    gila done lonely_mamba_6kr
         \\    gila sync
+        \\    gila find --priority=low --tags="or:tag1,tag2" --waiting-on="or:task1,task2"
         \\
     ;
 };
@@ -135,6 +142,7 @@ pub fn main() void {
         .done => |done| done.execute(io, &arena),
         .sync => |sync| sync.execute(io, &arena),
         .tui => |tui| tui.execute(io, &arena),
+        .find => |find| find.execute(io, &arena),
         .version => {
             var stdout = std.Io.File.stdout().writer(io, &.{});
             stdout.interface.print("v{s}\n", .{zon.version}) catch |err| {

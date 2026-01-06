@@ -42,7 +42,7 @@ tags: ?struct {
 } = null,
 waiting_on: ?struct {
     op: Op,
-    task_list: common.WaitingOn,
+    task_list: common.TaskList,
 
     pub fn parseFlagValue(gpa: std.mem.Allocator, flag_value: []const u8, error_out: *?[]const u8) error{Invalid}!@This() {
         if (flag_value.len == 0) {
@@ -61,7 +61,7 @@ waiting_on: ?struct {
         } else {
             result.op = .@"or";
         }
-        result.task_list = common.WaitingOn.parseFlagValue(gpa, data, error_out) catch return error.Invalid;
+        result.task_list = common.TaskList.parseFlagValue(gpa, data, error_out) catch return error.Invalid;
         return result;
     }
 } = null,

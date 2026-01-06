@@ -16,8 +16,8 @@ priority: gila.Priority = .medium,
 priority_value: u8 = 50,
 description: ?[]const u8 = null,
 tags: ?common.Tags = null,
-waiting_on: ?common.WaitingOn = null,
-blocks: ?common.Blocks = null,
+waiting_on: ?common.TaskList = null,
+blocks: ?common.TaskList = null,
 verbose: bool = false,
 edit: bool = false,
 positional: struct {
@@ -116,61 +116,62 @@ pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
     };
 
     const description_file = task.toTaskFile(io, true, arena, gila_dir) catch return;
+    log.debug("Successfully wrote task description file {s}", .{description_file});
 
     if (self.blocks) |blocks| {
         const fixed_buffer: []u8 = arena.pushArray(u8, 128 * 1024);
         var local_arena = stdx.Arena.initBuffer(fixed_buffer);
         for (blocks.tasks) |blocked_task_id| {
+            assert(blocked_task_id.len > 3);
+            const task_id = blocked_task_id[3 .. blocked_task_id.len - 3];
+
             local_arena.reset(false);
 
-            const result = gila.Task.findTaskAndRead(blocked_task_id, io, &local_arena, gila_dir) catch |err| {
-                log.err("Failed to find or read blocked task {s}: {s}", .{ blocked_task_id, @errorName(err) });
+            var result = gila.Task.findTaskAndRead(task_id, io, &local_arena, gila_dir) catch |err| {
+                log.err("Failed to find or read blocked task {s}: {s}", .{ task_id, @errorName(err) });
+                continue;
+            };
+            const blocked_task = &result.task;
+
+            if (blocked_task.status == .done or blocked_task.status == .cancelled) {
+                log.err("Cannot block task {s}: task is already {s}", .{ task_id, @tagName(blocked_task.status) });
+                continue;
+            }
+
+            const new_entry: []u8 = local_arena.pushArray(u8, task_name.len + 6);
+            @memcpy(new_entry[0..3], "\"[[");
+            @memcpy(new_entry[3..][0..task_name.len], task_name);
+            @memcpy(new_entry[3 + task_name.len ..], "]]\"");
+
+            if (blocked_task.waiting_on) |waiting_on| {
+                const new_list = local_arena.pushArray([]const u8, waiting_on.len + 1);
+                for (waiting_on, 0..) |item, index| {
+                    new_list[index] = item;
+                }
+                new_list[waiting_on.len] = new_entry;
+                blocked_task.waiting_on = new_list;
+            } else {
+                const new_list = local_arena.pushArray([]const u8, 1);
+                new_list[0] = new_entry;
+                blocked_task.waiting_on = new_list;
+            }
+
+            blocked_task.transition(.waiting) catch |err| {
+                log.err("Failed to transition task {s} to waiting: {s}", .{ task_id, @errorName(err) });
                 continue;
             };
 
-            if (result.task.status == .done or result.task.status == .cancelled) {
-                log.err("Cannot block task {s}: task is already {s}", .{ blocked_task_id, @tagName(result.task.status) });
+            common.moveTaskData(io, local_arena.allocator(), gila_dir, task_id, result.status, .waiting) catch |err| {
+                log.err("Failed to move task {s} to waiting: {s}", .{ task_id, @errorName(err) });
                 continue;
-            }
+            };
 
-            if (result.task.status == .todo or result.task.status == .started) {
-                var blocked_task = result.task;
+            _ = blocked_task.toTaskFile(io, false, &local_arena, gila_dir) catch |err| {
+                log.err("Failed to write task {s}: {s}", .{ task_id, @errorName(err) });
+                continue;
+            };
 
-                const new_entry: []u8 = local_arena.pushArray(u8, task_name.len + 6);
-                @memcpy(new_entry[0..3], "\"[[");
-                @memcpy(new_entry[3..][0..task_name.len], task_name);
-                @memcpy(new_entry[3 + task_name.len ..], "]]\"");
-
-                if (blocked_task.waiting_on) |waiting_on| {
-                    const new_list = local_arena.pushArray([]const u8, waiting_on.len + 1);
-                    for (waiting_on, 0..) |item, index| {
-                        new_list[index] = item;
-                    }
-                    new_list[waiting_on.len] = new_entry;
-                    blocked_task.waiting_on = new_list;
-                } else {
-                    const new_list = local_arena.pushArray([]const u8, 1);
-                    new_list[0] = new_entry;
-                    blocked_task.waiting_on = new_list;
-                }
-
-                blocked_task.transition(.waiting) catch |err| {
-                    log.err("Failed to transition task {s} to waiting: {s}", .{ blocked_task_id, @errorName(err) });
-                    continue;
-                };
-
-                common.moveTaskData(io, local_arena.allocator(), gila_dir, blocked_task_id, result.status, .waiting) catch |err| {
-                    log.err("Failed to move task {s} to waiting: {s}", .{ blocked_task_id, @errorName(err) });
-                    continue;
-                };
-
-                _ = blocked_task.toTaskFile(io, false, &local_arena, gila_dir) catch |err| {
-                    log.err("Failed to write task {s}: {s}", .{ blocked_task_id, @errorName(err) });
-                    continue;
-                };
-
-                log.info("Blocked task {s} is now waiting on {s}", .{ blocked_task_id, task_name });
-            }
+            log.info("Blocked task {s} is now waiting on {s}", .{ task_id, task_name });
         }
     }
 

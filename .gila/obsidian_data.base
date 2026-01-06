@@ -17,6 +17,8 @@ views:
       - created
       - waiting_on
     sort:
+      - property: tags
+        direction: ASC
       - property: status
         direction: DESC
       - property: priority

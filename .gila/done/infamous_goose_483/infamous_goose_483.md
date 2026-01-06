@@ -1,10 +1,11 @@
 ---
 title: Make key events in the TUI have a field that tells the physical button pressed
-status: todo
+status: done
 priority_value: 50
 priority: medium
 owner: adiraj
 created: 2026-01-05T03:13:25Z
+completed: 2026-01-06T05:44:14Z
 tags: 
 - tui
 ---

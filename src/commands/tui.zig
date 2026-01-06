@@ -9,196 +9,12 @@ const gila = @import("gila");
 const stdx = @import("stdx");
 
 const common = @import("common.zig");
+const e = @import("event.zig");
+const Event = e.Event;
 
 const Tui = @This();
 
 verbose: bool = false,
-
-pub const Event = union(enum) {
-    key: KeyEvent,
-    resize: ResizeEvent,
-    mouse: MouseEvent,
-    none,
-
-    pub const ResizeEvent = struct {
-        old_width: u16,
-        old_height: u16,
-        width: u16,
-        height: u16,
-    };
-
-    pub const MouseEvent = union(enum(u8)) {
-        move: Info,
-        drag_left: Info,
-        drag_middle: Info,
-        drag_right: Info,
-        scroll_up: Info,
-        scroll_down: Info,
-        left_pressed: Info,
-        middle_pressed: Info,
-        right_pressed: Info,
-        left_released: Info,
-        middle_released: Info,
-        right_released: Info,
-
-        pub const Info = struct {
-            modifiers: Mods,
-            x: u16,
-            y: u16,
-        };
-
-        pub const Button = enum(u8) {
-            left = 0,
-            middle = 1,
-            right = 2,
-            move = 3,
-        };
-
-        const shift_bit = 4;
-        const alt_bit = 8;
-        const ctrl_bit = 16;
-        const move_mask = 32;
-        const mouse_scroll_mask = 64;
-
-        pub fn parse(data: []const u8) error{Invalid}!MouseEvent {
-            assert(data[0] == '\x1b');
-            assert(data[1] == '[');
-
-            const m = std.mem.findAnyPos(u8, data, 3, "mM") orelse return error.Invalid;
-
-            const mouse_event_type, const coordinates = cutScalar(u8, data[3..m], ';') orelse return error.Invalid;
-            const string_x, const string_y = cutScalar(u8, coordinates, ';') orelse return error.Invalid;
-            const x = std.fmt.parseInt(u16, string_x, 10) catch return error.Invalid;
-            const y = std.fmt.parseInt(u16, string_y, 10) catch return error.Invalid;
-
-            const number = std.fmt.parseInt(u8, mouse_event_type, 10) catch return error.Invalid;
-            const button: Button = @enumFromInt(number & 0b11);
-            const ctrl: bool = (number & ctrl_bit) != 0;
-            const alt: bool = (number & alt_bit) != 0;
-            const shift: bool = (number & shift_bit) != 0;
-            const mouse_scroll = (number & mouse_scroll_mask) == mouse_scroll_mask;
-            const mouse_move = (number & move_mask) == move_mask;
-
-            if (mouse_move and mouse_scroll) return error.Invalid;
-
-            const info: Info = .{
-                .modifiers = .{ .ctrl = ctrl, .alt = alt, .shift = shift },
-                .x = x,
-                .y = y,
-            };
-
-            if (mouse_scroll) switch (button) {
-                .left => return .{ .scroll_up = info },
-                .middle => return .{ .scroll_down = info },
-                else => return error.Invalid,
-            } else if (mouse_move) switch (button) {
-                .left => return .{ .drag_left = info },
-                .middle => return .{ .drag_middle = info },
-                .right => return .{ .drag_right = info },
-                .move => return .{ .move = info },
-            } else switch (button) {
-                .left => if (data[m] == 'm') return .{ .left_released = info } else return .{ .left_pressed = info },
-                .middle => if (data[m] == 'm') return .{ .middle_released = info } else return .{ .middle_pressed = info },
-                .right => if (data[m] == 'm') return .{ .right_released = info } else return .{ .right_pressed = info },
-                else => return error.Invalid,
-            }
-            unreachable;
-        }
-
-        pub fn format(self: MouseEvent, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            switch (self) {
-                .move => |info| try writer.print("{f}mouse_move@[{d}x{d}]", .{ info.modifiers, info.x, info.y }),
-                .drag_left => |info| try writer.print("{f}mouse_drag+left_button@[{d}x{d}]", .{ info.modifiers, info.x, info.y }),
-                .drag_middle => |info| try writer.print("{f}mouse_drag+middle_button@[{d}x{d}]", .{ info.modifiers, info.x, info.y }),
-                .drag_right => |info| try writer.print("{f}mouse_drag+right_button@[{d}x{d}]", .{ info.modifiers, info.x, info.y }),
-                .scroll_up => |info| try writer.print("{f}mouse_scroll_up@[{d}x{d}]", .{ info.modifiers, info.x, info.y }),
-                .scroll_down => |info| try writer.print("{f}mouse_scroll_down@[{d}x{d}]", .{ info.modifiers, info.x, info.y }),
-                .left_pressed => |info| try writer.print("{f}mouse_left_button_pressed@[{d}x{d}]", .{ info.modifiers, info.x, info.y }),
-                .middle_pressed => |info| try writer.print("{f}mouse_middle_button_pressed@[{d}x{d}]", .{ info.modifiers, info.x, info.y }),
-                .right_pressed => |info| try writer.print("{f}mouse_right_button_pressed@[{d}x{d}]", .{ info.modifiers, info.x, info.y }),
-                .left_released => |info| try writer.print("{f}mouse_left_button_released@[{d}x{d}]", .{ info.modifiers, info.x, info.y }),
-                .middle_released => |info| try writer.print("{f}mouse_middle_button_released@[{d}x{d}]", .{ info.modifiers, info.x, info.y }),
-                .right_released => |info| try writer.print("{f}mouse_right_button_released@[{d}x{d}]", .{ info.modifiers, info.x, info.y }),
-            }
-        }
-    };
-
-    const Mods = packed struct(u8) {
-        shift: bool = false,
-        ctrl: bool = false,
-        alt: bool = false,
-        meta: bool = false,
-        super: bool = false,
-        hyper: bool = false,
-        _: u2 = 0,
-
-        pub fn format(self: Mods, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            if (self.shift) try writer.writeAll("shift+");
-            if (self.ctrl) try writer.writeAll("ctrl+");
-            if (self.alt) try writer.writeAll("alt+");
-            if (self.meta) try writer.writeAll("meta+");
-            if (self.super) try writer.writeAll("super+");
-            if (self.hyper) try writer.writeAll("hyper+");
-        }
-    };
-
-    pub const KeyEvent = struct {
-        code: Code,
-        physical_key: Code,
-        mods: Mods,
-
-        pub fn format(self: KeyEvent, writer: *std.Io.Writer) std.Io.Writer.Error!void {
-            try writer.print("{f}", .{self.mods});
-            switch (self.code) {
-                .tab => try writer.writeAll("tab"),
-                .enter => try writer.writeAll("enter"),
-                .backspace => try writer.writeAll("backspace"),
-                .escape => try writer.writeAll("escape"),
-                .space => try writer.writeAll("space"),
-                else => |value| {
-                    const c: u21 = @intFromEnum(value);
-                    switch (c) {
-                        32...126 => |code| {
-                            try writer.writeByte(@truncate(code));
-                        },
-                        else => |code| try writer.print("{d}", .{code}),
-                    }
-                },
-            }
-        }
-
-        pub fn parseAscii(c: u8) KeyEvent {
-            // @TODO [[infamous_goose_483]]
-            switch (c) {
-                9 => return .{ .code = .tab, .mods = .{}, .physical_key = .tab },
-                127 => return .{ .code = .backspace, .mods = .{}, .physical_key = .backspace },
-                27 => return .{ .code = .escape, .mods = .{}, .physical_key = .escape },
-                1...8, 11, 12, 14...26 => |ctrl| {
-                    return .{ .code = @enumFromInt(ctrl - 1 + 'a'), .mods = .{ .ctrl = true }, .physical_key = @enumFromInt(ctrl - 1 + 'a') };
-                },
-                10 => return .{ .code = @enumFromInt('j'), .mods = .{ .ctrl = true }, .physical_key = @enumFromInt('j') },
-                13 => return .{ .code = .enter, .mods = .{}, .physical_key = .enter },
-                0 => return .{ .code = @enumFromInt('@'), .mods = .{ .ctrl = true }, .physical_key = @enumFromInt('@') },
-                'a'...'z' => {
-                    return .{ .code = @enumFromInt(c), .mods = .{}, .physical_key = @enumFromInt(c - 'a' + 'A') };
-                },
-                'A'...'Z' => {
-                    return .{ .code = @enumFromInt(c), .mods = .{ .shift = true }, .physical_key = @enumFromInt(c) };
-                },
-                else => return .{ .code = @enumFromInt(c), .mods = .{}, .physical_key = @enumFromInt(c) },
-            }
-        }
-
-        pub const Code = enum(u21) {
-            tab = 0x09,
-            enter = 0x0d,
-            backspace = 0x7f,
-            escape = 0x1b,
-            space = 0x20,
-            _,
-        };
-    };
-};
 
 pub const Terminal = struct {
     fd: std.Io.File.Handle,
@@ -208,8 +24,9 @@ pub const Terminal = struct {
     buffer: [1024]u8,
     alt_screen: bool = false,
     size: Size,
-    event_queue: [4]Event = undefined,
+    event_queue: [32]Event = undefined,
     mouse_enabled: ?MouseOptions = null,
+    kitty_keyboard_flags: ?KittyConfig = null,
 
     pub const Size = struct { width: u16, height: u16 };
 
@@ -306,6 +123,7 @@ pub const Terminal = struct {
 
     pub fn setCursorPosition(self: *Terminal, x: u16, y: u16) error{WriteFailed}!void {
         try self.print("\x1b[{d};{d}H", .{ y + 1, x + 1 });
+        try self.flush();
     }
 
     pub fn setCursorVisible(self: *Terminal, visible: bool) error{WriteFailed}!void {
@@ -314,6 +132,7 @@ pub const Terminal = struct {
         } else {
             try self.write("\x1b[?25l");
         }
+        try self.flush();
     }
 
     pub fn getCursorPosition(self: *const Terminal) struct { x: u16, y: u16 } {
@@ -385,6 +204,7 @@ pub const Terminal = struct {
         if (options.sgr) {
             try self.write("\x1b[?1006h");
         }
+        try self.flush();
         self.mouse_enabled = options;
     }
 
@@ -394,8 +214,28 @@ pub const Terminal = struct {
             if (options.sgr) {
                 self.write("\x1b[?1006l") catch unreachable;
             }
+            self.flush() catch unreachable;
             self.mouse_enabled = null;
         }
+    }
+
+    pub const KittyConfig = packed struct(u8) {
+        disambiguate_escape_codes: bool = false,
+        report_event_types: bool = false,
+        report_alternate_keys: bool = false,
+        report_all_keys_as_escape_codes: bool = false,
+        report_associated_text: bool = false,
+        _: u3 = 0,
+    };
+
+    pub fn pushKittyKeyboardFlags(self: *Terminal, config: KittyConfig) error{WriteFailed}!void {
+        try self.print("\x1b[>{d}u", .{@as(u8, @bitCast(config))});
+        try self.flush();
+    }
+
+    pub fn popKittyKeyboardFlags(self: *Terminal) error{WriteFailed}!void {
+        try self.write("\x1b[<u");
+        try self.flush();
     }
 
     pub fn moveCursorLines(self: *Terminal, dx: i16, dy: i16) error{WriteFailed}!void {
@@ -426,35 +266,53 @@ pub const Terminal = struct {
             },
         };
 
-        const poll_result = std.posix.poll(&fds, timeout_ms) catch return error.PollFailed;
+        var buf: [1024]u8 = undefined;
+        var write_head: usize = 0;
+        reading_stdin: while (true) {
+            const poll_result = std.posix.poll(&fds, timeout_ms) catch return error.PollFailed;
 
-        if (poll_result == 0) {
-            // Timeout
-            return events.items;
-        }
-
-        if (fds[0].revents & std.posix.POLL.IN == 0) {
-            return events.items;
-        }
-
-        var buf: [32]u8 = undefined;
-        const n = std.posix.read(self.fd, &buf) catch return error.PollFailed;
-
-        // @TODO [[minty_core_jw2]]
-        if (n == 0) {
-            return events.items;
-        }
-
-        if (n == 1) {
-            events.appendAssumeCapacity(.{ .key = Event.KeyEvent.parseAscii(buf[0]) });
-        } else if (buf[0] == 27) {
-            if (n == 2) {
-                var key_event = Event.KeyEvent.parseAscii(buf[1]);
-                key_event.mods.alt = true;
-                events.appendAssumeCapacity(.{ .key = key_event });
+            if (poll_result == 0) {
+                // Timeout
+                return events.items;
             }
-            if (n > 3) blk: {
-                if (self.tryParseMouseEvent(buf[0..n], &events) catch return events.items) break :blk;
+
+            if (fds[0].revents & std.posix.POLL.IN == 0) {
+                return events.items;
+            }
+
+            const n = std.posix.read(self.fd, buf[write_head..]) catch return error.PollFailed;
+            if (n == 0) break;
+
+            // self.write("Read from stdin: { ") catch {};
+            // for (buf[0..n]) |c| {
+            //     if (c == '\x1b') {
+            //         self.write("\\x1b, ") catch {};
+            //         continue;
+            //     }
+            //     self.print("{c}, ", .{c}) catch return error.PollFailed;
+            // }
+            // self.write(" }\n") catch {};
+            // self.flush() catch {};
+
+            var data: []const u8 = buf[0..n];
+            while (data.len > 0) {
+                var consumed_bytes: usize = 0;
+                const event = e.parseEvent(data, &consumed_bytes);
+                if (consumed_bytes == 0) {
+                    for (0..data.len) |i| {
+                        buf[i] = data[i];
+                    }
+                    write_head = data.len;
+                    continue :reading_stdin;
+                }
+                write_head = 0;
+                data = data[consumed_bytes..];
+
+                // if (consumed_bytes > 0) self.print("consumed_bytes: {d}\r\n", .{consumed_bytes}) catch {};
+                self.flush() catch {};
+                if (event != .none) events.appendBounded(event) catch break :reading_stdin;
+
+                if (data.len == 0 and n != buf.len) break :reading_stdin;
             }
         }
 
@@ -474,17 +332,30 @@ pub const Terminal = struct {
         }
         return false;
     }
+
+    pub fn kittyKeyboardAvailable(self: *Terminal, timeout_ms: i32) bool {
+        self.write("\x1b[?u") catch {};
+        self.write("\x1b[c") catch {};
+        self.flush() catch {};
+
+        var fds = [_]std.posix.pollfd{
+            .{
+                .fd = self.stdin,
+                .events = std.posix.POLL.IN,
+                .revents = 0,
+            },
+        };
+
+        const poll_result = std.posix.poll(&fds, timeout_ms) catch return false;
+        if (poll_result == 0) return false;
+        var buf: [32]u8 = undefined;
+        const n = std.posix.read(self.stdin, &buf) catch return false;
+        if (n != 5) return false;
+        if (!std.mem.eql(u8, buf[0..3], "\x1b[?")) return false;
+        if (buf[4] != 'u') return false;
+        return true;
+    }
 };
-
-pub fn cut(comptime T: type, haystack: []const T, needle: []const T) ?struct { []const T, []const T } {
-    const index = std.mem.find(T, haystack, needle) orelse return null;
-    return .{ haystack[0..index], haystack[index + needle.len ..] };
-}
-
-pub fn cutScalar(comptime T: type, haystack: []const T, needle: T) ?struct { []const T, []const T } {
-    const index = std.mem.findScalar(T, haystack, needle) orelse return null;
-    return .{ haystack[0..index], haystack[index + 1 ..] };
-}
 
 pub fn execute(self: Tui, io: std.Io, arena: *stdx.Arena) void {
     _ = self;
@@ -506,6 +377,19 @@ pub fn execute(self: Tui, io: std.Io, arena: *stdx.Arena) void {
         return;
     };
     defer terminal.unsetAlternateScreen();
+
+    const kitty_available = terminal.kittyKeyboardAvailable(100);
+    if (kitty_available) terminal.pushKittyKeyboardFlags(.{
+        .disambiguate_escape_codes = true,
+        // .report_event_types = true,
+        // .report_all_keys_as_escape_codes = true,
+        .report_alternate_keys = true,
+        .report_associated_text = true,
+    }) catch |err| {
+        log.err("Failed to push kitty keyboard flags: {s}", .{@errorName(err)});
+        return;
+    };
+    defer if (kitty_available) terminal.popKittyKeyboardFlags() catch {};
 
     terminal.enableMouse(.default) catch |err| {
         log.err("Failed to enable mouse: {s}", .{@errorName(err)});
@@ -538,28 +422,23 @@ pub fn execute(self: Tui, io: std.Io, arena: *stdx.Arena) void {
 
         for (events, 0..) |event, index| {
             terminal.setCursorPosition(current_x, current_y + 4 + @as(u16, @truncate(index))) catch {};
+            terminal.print("{f}\n", .{event}) catch return;
             switch (event) {
-                .key => |key| {
-                    terminal.print("{f}\n", .{key}) catch return;
-                    if (key.physical_key == @as(Event.KeyEvent.Code, @enumFromInt('Q'))) {
+                .key_pressed => |key| {
+                    if (key.physical_key == .enter) {
                         quit = true;
                         break :event;
                     }
                 },
-                .mouse => |mouse| {
-                    terminal.print("{f}\n", .{mouse}) catch return;
-                    if (mouse == .left_pressed) {
-                        current_x = mouse.left_pressed.x;
-                        current_y = mouse.left_pressed.y;
-                    }
+                .mouse_left_pressed => |mouse| {
+                    current_x = mouse.x;
+                    current_y = mouse.y;
                 },
                 .resize => |resize| {
-                    terminal.print("Starting at {d}x{d}", .{ current_x, current_y }) catch return;
                     current_x = (resize.width * current_x) / resize.old_width;
                     current_y = (resize.height * current_y) / resize.old_height;
-                    terminal.print("Ending at {d}x{d}\n", .{ current_x, current_y }) catch return;
                 },
-                else => unreachable,
+                else => {},
             }
         }
 

@@ -27,7 +27,7 @@ pub fn build(b: *std.Build) void {
     } });
 
     const exe = b.addExecutable(.{
-        .name = "gila",
+        .name = if (optimize == .Debug) "gila_debug" else "gila",
         .root_module = exe_mod,
     });
 

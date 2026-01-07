@@ -16,6 +16,7 @@ waiting_on:
 - "[[shallow_wind_xbr]]"
 - "[[eager_quest_wwz]]"
 - "[[deficient_axe_v61]]"
+- "[[twin_radar_74b]]"
 tags: 
 - tui
 ---

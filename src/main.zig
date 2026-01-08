@@ -100,6 +100,8 @@ const CLIArgs = union(enum) {
         \\    gila find [--priority=low|medium|high|urgent] [--tags="<[or|and]:><tag1>,<tag2>,..."]
         \\              [--waiting-on="<[or|and]:><task1>,<task2>,..."] [--verbose]
         \\
+        \\    gila server [-h | --help] [--run-once]
+        \\
         \\Commands:
         \\    version   Prints the version of the GILA CLI.
         \\    init      Initializes a new GILA project in the current directory or the specified directory.
@@ -109,6 +111,7 @@ const CLIArgs = union(enum) {
         \\    sync      Synchronizes the tasks in the gila directory by analyzing the tasks and moving them to their appropriate folders
         \\              and modifies necessary properties.
         \\    find      Find tasks that match the given priority, tags and/or waiting_on list.
+        \\    server    Start JSON-RPC 2.0 server for programmatic access.
         \\
         \\Options:
         \\    -h, --help
@@ -120,6 +123,7 @@ const CLIArgs = union(enum) {
         \\    gila done lonely_mamba_6kr
         \\    gila sync
         \\    gila find --priority=low --tags="or:tag1,tag2" --waiting-on="or:task1,task2"
+        \\    echo '{"jsonrpc":"2.0","method":"task/create","params":{"title":"Test task","username":"user"},"id":1}' | gila server --run-once
         \\
     ;
 };

@@ -47,6 +47,17 @@ gila done --edit scared_nimbus_5kw
 
 **OR** modify the task in an editor and run `gila sync` to sync the changes.
 
+### GILA as a Service
+
+GILA can run as a JSON-RPC 2.0 server for programmatic access from other tools. The server reads JSON requests from stdin and writes responses to stdout.
+Spawn `gila` as a child process with `server` as the first argument to start the server. The server will run until it receives a `shutdown` request.
+See [SERVER.md](SERVER.md) for the complete protocol documentation. You can also run one-off requests with `gila server --run-once`.
+
+**Example**
+```bash
+echo '{"jsonrpc":"2.0","method":"task/create","params":{"title":"Test task","username":"user"},"id":1}' | gila server --run-once
+```
+
 ## Why?
 
 I often have `TODO` comments littered throughout
@@ -138,7 +149,12 @@ gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>]
           [--edit] <title>
 
 gila done [-h | --help] [--verbose] [--edit] <task_id>
+gila find [-h | --help] [--priority=<priority>] [--status=<status>]
+          [--tags="<tag1>,<tag2>,..."] [--limit=<number>] [--offset=<number>]
+          [--fields="<field1>,<field2>,..."] [--verbose]
 gila sync [-h | --help] [--verbose]
+
+gila server [-h | --help] [--run-once]
 ```
 
 | Command | Description |
@@ -146,6 +162,8 @@ gila sync [-h | --help] [--verbose]
 | `gila init` | Sets up a new GILA project in the current directory |
 | `gila todo` | Creates a new task in the current project |
 | `gila done` | Mark a task as done and moves it to the `done` folder |
-| `gila sync` | Synchrnoize tasks when you modify them manually |
+| `gila find` | Query tasks by filters (priority, status, tags, etc.) |
+| `gila sync` | Synchronize tasks when you modify them manually |
+| `gila server` | Start JSON-RPC 2.0 server for programmatic access |
 | `gila version` | Prints the version |
 

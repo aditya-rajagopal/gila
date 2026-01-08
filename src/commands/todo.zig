@@ -94,6 +94,40 @@ pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
     };
     const creation_dt = stdx.DateTimeUTC.now();
 
+    const waiting_on: ?[]const []const u8 = if (self.waiting_on) |waiting_on| blk: {
+        const new_list = arena.pushArray([]const u8, waiting_on.tasks.len);
+        var array = std.ArrayList([]const u8).initBuffer(new_list);
+        var fixed_buffer: [128 * 1024]u8 = undefined;
+        var local_arena = stdx.Arena.initBuffer(&fixed_buffer);
+        for (waiting_on.tasks) |waiting_task_id| {
+            assert(waiting_task_id.len > 6);
+            local_arena.reset(false);
+            const task_id = waiting_task_id[3 .. waiting_task_id.len - 3];
+            if (common.findString(array.items, waiting_task_id)) {
+                log.err("Duplicate waiting task {s} in waiting_on list", .{task_id});
+                continue;
+            }
+
+            var result = gila.Task.findTaskAndRead(task_id, io, &local_arena, gila_dir) catch |err| {
+                log.err("Failed to find or read task {s}: {s}", .{ task_id, @errorName(err) });
+                continue;
+            };
+            const blocked_task = &result.task;
+
+            if (blocked_task.status == .done or blocked_task.status == .cancelled) {
+                log.err("Cannot wait on task {s}: task is already {s}", .{ task_id, @tagName(blocked_task.status) });
+                continue;
+            }
+
+            const new_entry: []u8 = arena.pushArray(u8, task_id.len + 6);
+            @memcpy(new_entry[0..3], "\"[[");
+            @memcpy(new_entry[3..][0..task_id.len], task_id);
+            @memcpy(new_entry[3 + task_id.len ..], "]]\"");
+            array.appendAssumeCapacity(new_entry);
+        }
+        break :blk array.items;
+    } else null;
+
     const task: gila.Task = .{
         .id = task_name,
         .title = self.positional.title,
@@ -104,7 +138,7 @@ pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
         .created = creation_dt,
         .description = if (self.description) |description| description else "",
         .tags = if (self.tags) |tags| tags.tags else null,
-        .waiting_on = if (self.waiting_on) |waiting_on| waiting_on.tasks else null,
+        .waiting_on = waiting_on,
         .completed = null,
         .extra_lines = null,
     };
@@ -143,12 +177,12 @@ pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
             @memcpy(new_entry[3..][0..task_name.len], task_name);
             @memcpy(new_entry[3 + task_name.len ..], "]]\"");
 
-            if (blocked_task.waiting_on) |waiting_on| {
-                const new_list = local_arena.pushArray([]const u8, waiting_on.len + 1);
-                for (waiting_on, 0..) |item, index| {
+            if (blocked_task.waiting_on) |t| {
+                const new_list = local_arena.pushArray([]const u8, t.len + 1);
+                for (t, 0..) |item, index| {
                     new_list[index] = item;
                 }
-                new_list[waiting_on.len] = new_entry;
+                new_list[t.len] = new_entry;
                 blocked_task.waiting_on = new_list;
             } else {
                 const new_list = local_arena.pushArray([]const u8, 1);
@@ -199,4 +233,188 @@ pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
     var stdout = std.Io.File.stdout().writer(io, &.{});
     stdout.interface.print("New task created: {s}\n", .{task_name}) catch unreachable;
     return;
+}
+
+const testing = std.testing;
+const TestFs = @import("../testfs/root.zig").TestFs;
+const test_utils = @import("test_utils.zig");
+
+const initGilaProject = test_utils.initGilaProjectMinimal;
+const createTaskFile = test_utils.createTaskFile;
+const readAndParseTask = test_utils.readAndParseTask;
+const validateTask = test_utils.validateTask;
+const expectStdoutContains = test_utils.expectStdoutContains;
+const extractTaskId = test_utils.extractTaskIdFromStdout;
+
+test "basic task creation" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    var tags_storage: [3][]const u8 = undefined;
+    tags_storage[0] = "feature";
+    tags_storage[1] = "urgent";
+    tags_storage[2] = "backend";
+
+    const cmd: Todo = .{
+        .priority = .high,
+        .priority_value = 75,
+        .description = "This is a detailed description\nWith multiple lines",
+        .tags = .{ .tags = &tags_storage },
+        .waiting_on = null,
+        .blocks = null,
+        .verbose = false,
+        .edit = false,
+        .positional = .{ .title = "Test Task Title" },
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    try expectStdoutContains(fs, "New task created:");
+
+    const task_id = extractTaskId(fs.getStdout()) orelse return error.TaskIdNotFound;
+
+    const task = try readAndParseTask(fs, task_id, .todo);
+    try validateTask(&task);
+
+    try testing.expectEqualStrings("Test Task Title", task.title);
+    try testing.expectEqual(gila.Status.todo, task.status);
+    try testing.expectEqual(gila.Priority.high, task.priority);
+    try testing.expectEqual(@as(u8, 75), task.priority_value);
+
+    try testing.expect(task.completed == null);
+    try testing.expect(task.waiting_on == null);
+
+    const tags = task.tags orelse return error.ExpectedTags;
+    try testing.expectEqual(@as(usize, 3), tags.len);
+    try testing.expect(std.mem.indexOf(u8, tags[0], "feature") != null);
+    try testing.expect(std.mem.indexOf(u8, tags[1], "urgent") != null);
+    try testing.expect(std.mem.indexOf(u8, tags[2], "backend") != null);
+
+    try testing.expectEqualStrings("This is a detailed description\nWith multiple lines", task.description);
+}
+
+test "with waiting_on creates waiting task" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    try createTaskFile(fs, "todo", "base_task_abc", "Base Task", "medium", "", "Base task description\n");
+    try createTaskFile(fs, "todo", "base_tasktwo_abc", "Base Task Two", "medium", "", "Base task two description\n");
+    try createTaskFile(fs, "done", "base_taskthree_abc", "Base Task Three should fail", "medium", "", "Base task two description\n");
+
+    var waiting_on_storage: [5][]const u8 = undefined;
+    waiting_on_storage[0] = "\"[[base_task_abc]]\"";
+    waiting_on_storage[1] = "\"[[base_tasktwo_abc]]\"";
+    waiting_on_storage[2] = "\"[[base_taskthree_abc]]\"";
+    waiting_on_storage[3] = "\"[[base_taskthree_abc]]\"";
+    waiting_on_storage[4] = "\"[[nonexistent_task_abc]]\"";
+
+    const cmd: Todo = .{
+        .priority = .medium,
+        .priority_value = 50,
+        .description = null,
+        .tags = null,
+        .waiting_on = .{ .tasks = &waiting_on_storage },
+        .blocks = null,
+        .verbose = false,
+        .edit = false,
+        .positional = .{ .title = "Waiting Task" },
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    const task_id = extractTaskId(fs.getStdout()) orelse return error.TaskIdNotFound;
+
+    const task = try readAndParseTask(fs, task_id, .waiting);
+
+    try testing.expectEqual(gila.Status.waiting, task.status);
+    const waiting_on = task.waiting_on orelse return error.ExpectedWaitingOn;
+    try testing.expectEqual(@as(usize, 2), waiting_on.len);
+    try testing.expectEqualStrings("\"[[base_task_abc]]\"", waiting_on[0]);
+    try testing.expectEqualStrings("\"[[base_tasktwo_abc]]\"", waiting_on[1]);
+}
+
+test "with blocks transitions blocked task" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    try createTaskFile(fs, "todo", "will_block_abc", "Task To Block", "medium", "", "This task will be blocked\n");
+    try createTaskFile(fs, "todo", "will_blocktwo_abc", "Task To Block Two", "medium", "", "This task will be blocked\n");
+
+    var blocks_storage: [2][]const u8 = undefined;
+    blocks_storage[0] = "\"[[will_block_abc]]\"";
+    blocks_storage[1] = "\"[[will_blocktwo_abc]]\"";
+
+    const cmd: Todo = .{
+        .priority = .medium,
+        .priority_value = 50,
+        .description = null,
+        .tags = null,
+        .waiting_on = null,
+        .blocks = .{ .tasks = &blocks_storage },
+        .verbose = false,
+        .edit = false,
+        .positional = .{ .title = "Blocking Task" },
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    try expectStdoutContains(fs, "New task created:");
+    const task_id = extractTaskId(fs.getStdout()) orelse return error.TaskIdNotFound;
+    var buffer: [64]u8 = undefined;
+    const task_name = std.fmt.bufPrint(&buffer, "\"[[{s}]]\"", .{task_id}) catch unreachable;
+
+    try testing.expect(fs.dirExists(".gila/waiting/will_block_abc"));
+    try testing.expect(!fs.dirExists(".gila/todo/will_block_abc"));
+
+    const blocked_task = try readAndParseTask(fs, "will_block_abc", .waiting);
+    try testing.expectEqual(gila.Status.waiting, blocked_task.status);
+    const waiting_on = blocked_task.waiting_on orelse return error.ExpectedWaitingOn;
+    try testing.expectEqual(1, waiting_on.len);
+    try testing.expectEqualStrings(task_name, waiting_on[0]);
+
+    const blocked_task_two = try readAndParseTask(fs, "will_blocktwo_abc", .waiting);
+    try testing.expectEqual(gila.Status.waiting, blocked_task_two.status);
+    const waiting_on_two = blocked_task_two.waiting_on orelse return error.ExpectedWaitingOn;
+    try testing.expectEqual(1, waiting_on_two.len);
+    try testing.expectEqualStrings(task_name, waiting_on_two[0]);
+}
+
+test "no gila directory" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    const cmd: Todo = .{
+        .priority = .medium,
+        .priority_value = 50,
+        .description = null,
+        .tags = null,
+        .waiting_on = null,
+        .blocks = null,
+        .verbose = false,
+        .edit = false,
+        .positional = .{ .title = "Test Task" },
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    const stdout = fs.getStdout();
+    try testing.expectEqual(0, stdout.len);
 }

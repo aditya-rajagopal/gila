@@ -3,6 +3,45 @@ const std = @import("std");
 const handle_mod = @import("handle.zig");
 const Handle = handle_mod.Handle;
 
+// @TODO A much more optimized implementation
+pub const FileSystem = struct {
+    nodes: std.ArrayList(Node),
+    free_list: std.ArrayList(NodeIndex),
+    child_buffer: std.ArrayList(Child),
+    memory: []u8,
+
+    pub const NodeIndex = enum(u32) { _ };
+
+    pub const Node = struct {
+        parent: ?NodeIndex,
+        name: Name,
+    };
+
+    const MAX_NAME_LEN = std.fs.max_name_bytes;
+    const MAX_PATH_LEN = std.fs.max_path_bytes;
+    const MAX_DEPTH = MAX_PATH_LEN / MAX_NAME_LEN;
+
+    pub const Name = struct {
+        data: [MAX_NAME_LEN]u8,
+        len: u8,
+    };
+
+    pub const File = struct {
+        data: std.ArrayList(u8),
+    };
+
+    pub const Dir = struct {
+        entries: ChildIndex,
+    };
+
+    pub const ChildIndex = enum(u32) { _ };
+    pub const Child = struct {
+        prev: ?ChildIndex,
+        next: ?ChildIndex,
+        entries: [16]NodeIndex,
+    };
+};
+
 pub const Descriptor = union(enum) {
     file: *VirtualFile,
     directory: *VirtualDir,

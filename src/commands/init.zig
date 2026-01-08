@@ -99,3 +99,89 @@ pub fn execute(self: @This(), io: std.Io, arena: *stdx.Arena) void {
 
     return;
 }
+
+const testing = std.testing;
+const TestFs = @import("../testfs/root.zig").TestFs;
+
+const Init = @This();
+
+test "creates gila directory" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    const cmd: Init = .{
+        .bare = false,
+        .verbose = false,
+        .positional = .{ .directory = null },
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    try testing.expect(fs.dirExists(".gila"));
+    try testing.expect(fs.dirExists(".gila/todo"));
+    try std.testing.expectEqualStrings("Initialized GILA project: /home/test/.gila\n", fs.getStdout());
+}
+
+test "bare mode" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    const cmd: Init = .{
+        .bare = true,
+        .verbose = false,
+        .positional = .{ .directory = null },
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    try testing.expect(fs.dirExists(".gila"));
+    try testing.expect(!fs.dirExists(".gila/todo"));
+    try std.testing.expectEqualStrings("Initialized GILA project: /home/test/.gila\n", fs.getStdout());
+}
+
+test "already exists" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try fs.createDir(".gila");
+
+    const cmd: Init = .{
+        .bare = false,
+        .verbose = false,
+        .positional = .{ .directory = null },
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    const stdout = fs.getStdout();
+    try std.testing.expectEqual(0, stdout.len);
+}
+
+test "directory" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    const cmd: Init = .{
+        .bare = false,
+        .verbose = false,
+        .positional = .{ .directory = "/home" },
+    };
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    try testing.expect(fs.dirExists("/home/.gila"));
+    try testing.expect(fs.dirExists("/home/.gila/todo"));
+
+    try std.testing.expectEqualStrings("Initialized GILA project: /home/.gila\n", fs.getStdout());
+}

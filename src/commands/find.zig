@@ -105,19 +105,6 @@ pub fn execute(self: Find, io: std.Io, arena: *stdx.Arena) void {
     if (!self.verbose) {
         root.log_level = .warn;
     }
-    // log.info("Finding tasks", .{});
-    // log.info("Priority: {s}", .{if (self.priority) |p| @tagName(p) else "none"});
-    // if (self.tags) |tags| {
-    //     log.info("Tags op: {s}", .{@tagName(tags.op)});
-    //     log.info("Tags: {any}", .{tags.tag_list.tags});
-    // } else {
-    //     log.info("Tags: none", .{});
-    // }
-    // if (self.waiting_on) |waiting_on| {
-    //     log.info("Waiting on: {any}", .{waiting_on.task_list.tasks});
-    // } else {
-    //     log.info("Waiting on: none", .{});
-    // }
 
     const gila_path, var gila_dir = common.getGilaDir(io, allocator) orelse return;
     defer gila_dir.close(io);
@@ -186,13 +173,7 @@ pub fn execute(self: Find, io: std.Io, arena: *stdx.Arena) void {
     writer.interface.flush() catch unreachable;
 }
 
-pub fn find(haystack: []const []const u8, needle: []const u8) bool {
-    for (haystack) |item| {
-        if (std.mem.eql(u8, item, needle)) return true;
-    }
-    return false;
-}
-
+const find = common.findString;
 pub fn testTask(self: Find, task: gila.Task) bool {
     if (self.priority) |priority| {
         if (priority == task.priority) return true;
@@ -328,3 +309,205 @@ fn moveTask(
     return .{ .moved = task.status };
 }
 
+const testing = std.testing;
+const TestFs = @import("../testfs/root.zig").TestFs;
+const test_utils = @import("test_utils.zig");
+
+const initGilaProject = test_utils.initGilaProjectMinimal;
+const createTaskFile = test_utils.createTaskFile;
+const expectStdoutContains = test_utils.expectStdoutContains;
+
+test "by priority" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    try createTaskFile(fs, "todo", "high_pri_abc", "High Priority", "high", "", "High priority task\n");
+    try createTaskFile(fs, "todo", "low_pri_abc", "Low Priority", "low", "", "Low priority task\n");
+
+    const cmd: Find = .{
+        .priority = .high,
+        .tags = null,
+        .waiting_on = null,
+        .verbose = false,
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    const stdout = fs.getStdout();
+    try testing.expect(std.mem.indexOf(u8, stdout, "high_pri_abc") != null);
+    try testing.expect(std.mem.indexOf(u8, stdout, "low_pri_abc") == null);
+}
+
+test "by tags with or" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    const feature_content =
+        \\---
+        \\title: Feature Task
+        \\status: todo
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\tags:
+        \\- feature
+        \\---
+        \\Feature description
+        \\
+    ;
+    try fs.createFile(".gila/todo/feature_tsk_abc/feature_tsk_abc.md", feature_content);
+
+    const bugfix_content =
+        \\---
+        \\title: Bugfix Task
+        \\status: todo
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\tags:
+        \\- bugfix
+        \\---
+        \\Bugfix description
+        \\
+    ;
+    try fs.createFile(".gila/todo/bugfix_tsk_abc/bugfix_tsk_abc.md", bugfix_content);
+
+    const other_content =
+        \\---
+        \\title: Other Task
+        \\status: todo
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\tags:
+        \\- other
+        \\---
+        \\Other description
+        \\
+    ;
+    try fs.createFile(".gila/todo/other_tsk_abc/other_tsk_abc.md", other_content);
+
+    var tags_storage: [2][]const u8 = undefined;
+    tags_storage[0] = "feature";
+    tags_storage[1] = "bugfix";
+
+    const cmd: Find = .{
+        .priority = null,
+        .tags = .{
+            .op = .@"or",
+            .tag_list = .{ .tags = &tags_storage },
+        },
+        .waiting_on = null,
+        .verbose = false,
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    const stdout = fs.getStdout();
+    try testing.expect(std.mem.indexOf(u8, stdout, "feature_tsk_abc") != null);
+    try testing.expect(std.mem.indexOf(u8, stdout, "bugfix_tsk_abc") != null);
+    try testing.expect(std.mem.indexOf(u8, stdout, "other_tsk_abc") == null);
+}
+
+test "by tags with and" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    const both_content =
+        \\---
+        \\title: Both Tags Task
+        \\status: todo
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\tags:
+        \\- feature
+        \\- urgent
+        \\---
+        \\Has both tags
+        \\
+    ;
+    try fs.createFile(".gila/todo/both_tags_abc/both_tags_abc.md", both_content);
+
+    const one_content =
+        \\---
+        \\title: One Tag Task
+        \\status: todo
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\tags:
+        \\- feature
+        \\---
+        \\Has one tag
+        \\
+    ;
+    try fs.createFile(".gila/todo/one_tag_abc/one_tag_abc.md", one_content);
+
+    var tags_storage: [2][]const u8 = undefined;
+    tags_storage[0] = "feature";
+    tags_storage[1] = "urgent";
+
+    const cmd: Find = .{
+        .priority = null,
+        .tags = .{
+            .op = .@"and",
+            .tag_list = .{ .tags = &tags_storage },
+        },
+        .waiting_on = null,
+        .verbose = false,
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    const stdout = fs.getStdout();
+    try testing.expect(std.mem.indexOf(u8, stdout, "both_tags_abc") != null);
+    try testing.expect(std.mem.indexOf(u8, stdout, "one_tag_abc") == null);
+}
+
+test "no matches" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    try createTaskFile(fs, "todo", "low_only_abc", "Low Task", "low", "", "Low priority only\n");
+
+    const cmd: Find = .{
+        .priority = .urgent,
+        .tags = null,
+        .waiting_on = null,
+        .verbose = false,
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    try expectStdoutContains(fs, "Tasks found:");
+    const stdout = fs.getStdout();
+    try testing.expect(std.mem.indexOf(u8, stdout, "low_only_abc") == null);
+}
+
+// @TODO add tests for waiting_on

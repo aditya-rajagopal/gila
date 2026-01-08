@@ -367,3 +367,302 @@ fn moveTask(
     log.info("Successfully moved task {s} to {s}", .{ task_name, @tagName(task.status) });
     return .{ .moved = task.status };
 }
+
+const testing = std.testing;
+const TestFs = @import("../testfs/root.zig").TestFs;
+const test_utils = @import("test_utils.zig");
+
+const initGilaProject = test_utils.initGilaProjectMinimal;
+const createTaskFile = test_utils.createTaskFile;
+const readAndParseTask = test_utils.readAndParseTask;
+const validateTask = test_utils.validateTask;
+const expectStdoutContains = test_utils.expectStdoutContains;
+
+test "file status overrides folder" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    const task_content =
+        \\---
+        \\title: Misplaced Task
+        \\status: started
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\---
+        \\Misplaced description
+        \\
+    ;
+    try fs.createFile(".gila/todo/misplaced_tsk_abc/misplaced_tsk_abc.md", task_content);
+
+    const cmd: Sync = .{
+        .verbose = false,
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    try testing.expect(!fs.dirExists(".gila/todo/misplaced_tsk_abc"));
+    try testing.expect(fs.dirExists(".gila/started/misplaced_tsk_abc"));
+
+    const task = try readAndParseTask(fs, "misplaced_tsk_abc", .started);
+    try validateTask(&task);
+    try testing.expectEqual(gila.Status.started, task.status);
+
+    try expectStdoutContains(fs, "Moved misplaced_tsk_abc:");
+}
+
+test "waiting task with done deps" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    const done_content =
+        \\---
+        \\title: Done Dependency
+        \\status: done
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\completed: 2025-01-07T14:00:00Z
+        \\---
+        \\Completed task
+        \\
+    ;
+    try fs.createFile(".gila/done/done_dep_abc/done_dep_abc.md", done_content);
+
+    const waiting_content =
+        \\---
+        \\title: Waiting Task
+        \\status: waiting
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\waiting_on:
+        \\- "[[done_dep_abc]]"
+        \\---
+        \\Waiting description
+        \\
+    ;
+    try fs.createFile(".gila/waiting/wait_task_abc/wait_task_abc.md", waiting_content);
+
+    const cmd: Sync = .{
+        .verbose = false,
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    try testing.expect(!fs.dirExists(".gila/waiting/wait_task_abc"));
+    try testing.expect(fs.dirExists(".gila/todo/wait_task_abc"));
+
+    const task = try readAndParseTask(fs, "wait_task_abc", .todo);
+    try validateTask(&task);
+    try testing.expectEqual(gila.Status.todo, task.status);
+    try testing.expect(task.waiting_on == null);
+}
+
+test "multiple transitions" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    const task1_content =
+        \\---
+        \\title: Task One
+        \\status: started
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\---
+        \\Task one desc
+        \\
+    ;
+    try fs.createFile(".gila/todo/task_one_abc/task_one_abc.md", task1_content);
+
+    const task2_content =
+        \\---
+        \\title: Task Two
+        \\status: done
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\completed: 2025-01-07T15:00:00Z
+        \\---
+        \\Task two desc
+        \\
+    ;
+    try fs.createFile(".gila/started/task_two_abc/task_two_abc.md", task2_content);
+
+    const cmd: Sync = .{
+        .verbose = false,
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    try testing.expect(fs.dirExists(".gila/started/task_one_abc"));
+    try testing.expect(fs.dirExists(".gila/done/task_two_abc"));
+    try testing.expect(!fs.dirExists(".gila/todo/task_one_abc"));
+    try testing.expect(!fs.dirExists(".gila/started/task_two_abc"));
+
+    const task1 = try readAndParseTask(fs, "task_one_abc", .started);
+    try validateTask(&task1);
+    try testing.expectEqual(gila.Status.started, task1.status);
+
+    const task2 = try readAndParseTask(fs, "task_two_abc", .done);
+    try validateTask(&task2);
+    try testing.expectEqual(gila.Status.done, task2.status);
+    try testing.expect(task2.completed != null);
+}
+
+test "no changes needed" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    try createTaskFile(fs, "todo", "correct_tsk_abc", "Correct Task", "medium", "", "Properly placed\n");
+
+    const cmd: Sync = .{
+        .verbose = false,
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    const stdout = fs.getStdout();
+    try testing.expect(std.mem.indexOf(u8, stdout, "Moved") == null);
+}
+
+test "waiting task all deps done" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    const done1_content =
+        \\---
+        \\title: Done Dep 1
+        \\status: done
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\completed: 2025-01-07T14:00:00Z
+        \\---
+        \\Done 1
+        \\
+    ;
+    try fs.createFile(".gila/done/done_one_abc/done_one_abc.md", done1_content);
+
+    const done2_content =
+        \\---
+        \\title: Done Dep 2
+        \\status: done
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\completed: 2025-01-07T14:30:00Z
+        \\---
+        \\Done 2
+        \\
+    ;
+    try fs.createFile(".gila/done/done_two_abc/done_two_abc.md", done2_content);
+
+    const waiting_content =
+        \\---
+        \\title: Multi Dep Waiting
+        \\status: waiting
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\waiting_on:
+        \\- "[[done_one_abc]]"
+        \\- "[[done_two_abc]]"
+        \\---
+        \\Waiting on multiple
+        \\
+    ;
+    try fs.createFile(".gila/waiting/multi_wait_abc/multi_wait_abc.md", waiting_content);
+
+    const cmd: Sync = .{
+        .verbose = false,
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    try testing.expect(!fs.dirExists(".gila/waiting/multi_wait_abc"));
+    try testing.expect(fs.dirExists(".gila/todo/multi_wait_abc"));
+}
+
+test "preserves custom frontmatter" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    const task_content =
+        \\---
+        \\title: Custom Fields Task
+        \\status: started
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\my_custom_field: some value
+        \\another_field:
+        \\- item1
+        \\- item2
+        \\Unstructured data line
+        \\---
+        \\Description
+        \\
+    ;
+    try fs.createFile(".gila/todo/custom_syn_abc/custom_syn_abc.md", task_content);
+
+    const cmd: Sync = .{
+        .verbose = false,
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    try testing.expect(fs.dirExists(".gila/started/custom_syn_abc"));
+
+    const task = try readAndParseTask(fs, "custom_syn_abc", .started);
+    try validateTask(&task);
+    try testing.expectEqual(gila.Status.started, task.status);
+
+    const extra_lines = task.extra_lines orelse return error.ExpectedExtraLines;
+    try testing.expectEqual(5, extra_lines.len);
+    try testing.expectEqualStrings("my_custom_field: some value", extra_lines[0]);
+    try testing.expectEqualStrings("another_field:", extra_lines[1]);
+    try testing.expectEqualStrings("- item1", extra_lines[2]);
+    try testing.expectEqualStrings("- item2", extra_lines[3]);
+    try testing.expectEqualStrings("Unstructured data line", extra_lines[4]);
+}

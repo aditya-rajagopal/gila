@@ -11,6 +11,13 @@ pub fn getUserName(gpa: std.mem.Allocator) ![]const u8 {
     return std.process.getEnvVarOwned(gpa, user_env);
 }
 
+pub fn findString(haystack: []const []const u8, needle: []const u8) bool {
+    for (haystack) |item| {
+        if (std.mem.eql(u8, item, needle)) return true;
+    }
+    return false;
+}
+
 pub fn moveTaskData(io: std.Io, allocator: std.mem.Allocator, gila_dir: std.Io.Dir, task_name: []const u8, from: gila.Status, to: gila.Status) !void {
     if (from == to) return;
     const from_folder = std.fs.path.join(allocator, &.{ @tagName(from), task_name }) catch |err| {

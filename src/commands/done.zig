@@ -125,3 +125,193 @@ pub fn execute(self: Done, io: std.Io, arena: *stdx.Arena) void {
         log.debug("Editor exited with code {any} at {f}", .{ exit_code, stdx.DateTimeUTC.now() });
     }
 }
+
+const testing = std.testing;
+const TestFs = @import("../testfs/root.zig").TestFs;
+const test_utils = @import("test_utils.zig");
+
+const initGilaProject = test_utils.initGilaProjectMinimal;
+const createTaskFile = test_utils.createTaskFile;
+const readAndParseTask = test_utils.readAndParseTask;
+const validateTask = test_utils.validateTask;
+const expectStdoutContains = test_utils.expectStdoutContains;
+
+test "marks todo task as done" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+    try createTaskFile(fs, "todo", "done_task_abc", "Task To Complete", "medium", "", "Task description\n");
+
+    const cmd: Done = .{
+        .verbose = false,
+        .edit = false,
+        .positional = .{ .task = "done_task_abc" },
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    try expectStdoutContains(fs, "Successfully completed task done_task_abc. Great success!");
+    try testing.expect(fs.dirExists(".gila/done/done_task_abc"));
+    try testing.expect(!fs.dirExists(".gila/todo/done_task_abc"));
+
+    const task = try readAndParseTask(fs, "done_task_abc", .done);
+    try validateTask(&task);
+
+    try testing.expectEqual(gila.Status.done, task.status);
+    try testing.expect(task.completed != null);
+    try testing.expectEqualStrings("Task To Complete", task.title);
+    try testing.expectEqual(50, task.priority_value);
+    try testing.expectEqual(gila.Priority.medium, task.priority);
+    try testing.expectEqualStrings("Task description\n", task.description);
+}
+
+test "invalid task id" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    const cmd: Done = .{
+        .verbose = false,
+        .edit = false,
+        .positional = .{ .task = "invalid-id-format" },
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    const stdout = fs.getStdout();
+    try testing.expectEqual(0, stdout.len);
+}
+
+test "already done task" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    const task_content =
+        \\---
+        \\title: Already Done Task
+        \\status: done
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\completed: 2025-01-07T14:00:00Z
+        \\---
+        \\Already completed
+        \\
+    ;
+    try fs.createFile(".gila/done/already_done_abc/already_done_abc.md", task_content);
+
+    const cmd: Done = .{
+        .verbose = false,
+        .edit = false,
+        .positional = .{ .task = "already_done_abc" },
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    const stdout = fs.getStdout();
+    try testing.expect(std.mem.indexOf(u8, stdout, "Successfully completed task") == null);
+}
+
+test "task with waiting_on" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    const task_content =
+        \\---
+        \\title: Waiting Task
+        \\status: todo
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\created: 2025-01-07T12:00:00Z
+        \\waiting_on:
+        \\- "[[other_task_xyz]]"
+        \\---
+        \\Has dependencies
+        \\
+    ;
+    try fs.createFile(".gila/todo/waiting_tsk_abc/waiting_tsk_abc.md", task_content);
+
+    const cmd: Done = .{
+        .verbose = false,
+        .edit = false,
+        .positional = .{ .task = "waiting_tsk_abc" },
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    const stdout = fs.getStdout();
+    try testing.expect(std.mem.indexOf(u8, stdout, "Successfully completed task") == null);
+}
+
+test "preserves custom frontmatter" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+
+    const task_content =
+        \\---
+        \\title: Task With Custom Fields
+        \\status: todo
+        \\priority_value: 50
+        \\priority: medium
+        \\owner: testuser
+        \\custom_property:
+        \\- value1
+        \\- value2
+        \\created: 2025-01-07T12:00:00Z
+        \\user_notes: Important context here
+        \\Random unstructured line
+        \\---
+        \\Description body
+        \\
+    ;
+    try fs.createFile(".gila/todo/custom_fld_abc/custom_fld_abc.md", task_content);
+
+    const cmd: Done = .{
+        .verbose = false,
+        .edit = false,
+        .positional = .{ .task = "custom_fld_abc" },
+    };
+
+    var arena_buffer: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buffer);
+
+    cmd.execute(fs.io(), &arena);
+
+    try expectStdoutContains(fs, "Successfully completed task");
+
+    const task = try readAndParseTask(fs, "custom_fld_abc", .done);
+    try validateTask(&task);
+
+    try testing.expectEqual(gila.Status.done, task.status);
+    try testing.expect(task.completed != null);
+
+    const extra_lines = task.extra_lines orelse return error.ExpectedExtraLines;
+    try testing.expectEqual(5, extra_lines.len);
+    try testing.expectEqualStrings("custom_property:", extra_lines[0]);
+    try testing.expectEqualStrings("- value1", extra_lines[1]);
+    try testing.expectEqualStrings("- value2", extra_lines[2]);
+    try testing.expectEqualStrings("user_notes: Important context here", extra_lines[3]);
+    try testing.expectEqualStrings("Random unstructured line", extra_lines[4]);
+}

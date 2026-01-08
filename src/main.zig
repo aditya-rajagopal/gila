@@ -13,6 +13,7 @@ const Done = @import("commands/done.zig");
 const Sync = @import("commands/sync.zig");
 const Tui = @import("commands/tui.zig");
 const Find = @import("commands/find.zig");
+const Server = @import("commands/server.zig");
 
 pub const std_options: std.Options = .{
     .log_level = default_log_level,
@@ -74,6 +75,7 @@ const CLIArgs = union(enum) {
     sync: Sync,
     tui: Tui,
     find: Find,
+    server: Server,
     version,
 
     pub const help =
@@ -143,6 +145,7 @@ pub fn main() void {
         .sync => |sync| sync.execute(io, &arena),
         .tui => |tui| tui.execute(io, &arena),
         .find => |find| find.execute(io, &arena),
+        .server => |server| server.execute(io, &arena),
         .version => {
             var stdout = std.Io.File.stdout().writer(io, &.{});
             stdout.interface.print("v{s}\n", .{zon.version}) catch |err| {

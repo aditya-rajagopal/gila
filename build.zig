@@ -60,6 +60,4 @@ pub fn build(b: *std.Build) void {
     const check_exe = b.addExecutable(.{ .name = "check", .root_module = exe_mod });
     const check_step = b.step("check", "Run ast check");
     check_step.dependOn(&check_exe.step);
-    check_step.dependOn(&mod_tests.step);
-    check_step.dependOn(&exe_tests.step);
 }

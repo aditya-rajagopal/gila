@@ -156,6 +156,8 @@ pub fn main() void {
     }
 }
 
+const command_test = @import("commands/command_test.zig");
 test "All" {
     std.testing.refAllDecls(@This());
+    _ = command_test;
 }

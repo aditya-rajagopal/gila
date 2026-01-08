@@ -49,7 +49,11 @@ pub fn dirOpenDir(
 
     const entry = descriptors.resolvePath(fs.root, parent, sub_path) orelse return error.FileNotFound;
     switch (entry) {
-        .directory => |d| return .{ .handle = d.handle },
+        .directory => |d| {
+            // Reset iteration state for fresh iteration on each open
+            d.resetIteration();
+            return .{ .handle = d.handle };
+        },
         .file => return error.NotDir,
     }
 }
@@ -347,6 +351,12 @@ pub fn fileWriteStreaming(
     const fs = getTestFs(userdata);
     var total_written: usize = 0;
 
+    // Note: splat indicates how many times the last data chunk should be counted
+    // for the return value, but it's already included in data. We should NOT
+    // write it additional times. The splat is used by the Writer to track how
+    // much buffer space was used for repeated items.
+    _ = splat;
+
     if (handle_mod.isStdout(file.handle)) {
         if (header.len > 0) {
             fs.stdout_buffer.appendSlice(fs.allocator, header) catch return error.SystemResources;
@@ -355,13 +365,6 @@ pub fn fileWriteStreaming(
         for (data) |chunk| {
             fs.stdout_buffer.appendSlice(fs.allocator, chunk) catch return error.SystemResources;
             total_written += chunk.len;
-        }
-        if (splat > 0 and data.len > 0) {
-            const last = data[data.len - 1];
-            for (0..splat) |_| {
-                fs.stdout_buffer.appendSlice(fs.allocator, last) catch return error.SystemResources;
-                total_written += last.len;
-            }
         }
         return total_written;
     }
@@ -375,13 +378,6 @@ pub fn fileWriteStreaming(
             fs.stderr_buffer.appendSlice(fs.allocator, chunk) catch return error.SystemResources;
             total_written += chunk.len;
         }
-        if (splat > 0 and data.len > 0) {
-            const last = data[data.len - 1];
-            for (0..splat) |_| {
-                fs.stderr_buffer.appendSlice(fs.allocator, last) catch return error.SystemResources;
-                total_written += last.len;
-            }
-        }
         return total_written;
     }
 
@@ -394,13 +390,6 @@ pub fn fileWriteStreaming(
     for (data) |chunk| {
         vfile.write(chunk) catch return error.SystemResources;
         total_written += chunk.len;
-    }
-    if (splat > 0 and data.len > 0) {
-        const last = data[data.len - 1];
-        for (0..splat) |_| {
-            vfile.write(last) catch return error.SystemResources;
-            total_written += last.len;
-        }
     }
 
     return total_written;
@@ -476,8 +465,42 @@ pub fn dirStatFile(_: ?*anyopaque, _: Dir, _: []const u8, _: Dir.StatFileOptions
     notImplemented();
 }
 
-pub fn dirRealPath(_: ?*anyopaque, _: Dir, _: []u8) Dir.RealPathError!usize {
-    notImplemented();
+pub fn dirRealPath(userdata: ?*anyopaque, dir: Dir, out_buffer: []u8) Dir.RealPathError!usize {
+    const fs = getTestFs(userdata);
+    const vdir = getDir(fs, dir.handle) orelse return error.FileNotFound;
+
+    // Build path by traversing parent chain
+    var components: [64][]const u8 = undefined;
+    var count: usize = 0;
+    var current: ?*VirtualDir = vdir;
+
+    while (current) |c| {
+        if (c.name.len > 0) {
+            components[count] = c.name;
+            count += 1;
+        }
+        current = c.parent;
+    }
+
+    // Build path in reverse order (from root to current)
+    var pos: usize = 0;
+    if (count == 0) {
+        // Root directory
+        out_buffer[0] = '/';
+        return 1;
+    }
+
+    var i: usize = count;
+    while (i > 0) {
+        i -= 1;
+        out_buffer[pos] = '/';
+        pos += 1;
+        const name = components[i];
+        @memcpy(out_buffer[pos..][0..name.len], name);
+        pos += name.len;
+    }
+
+    return pos;
 }
 
 pub fn dirRealPathFile(_: ?*anyopaque, _: Dir, _: []const u8, _: []u8) Dir.RealPathFileError!usize {
@@ -524,8 +547,19 @@ pub fn dirHardLink(_: ?*anyopaque, _: Dir, _: []const u8, _: Dir, _: []const u8,
     notImplemented();
 }
 
-pub fn fileStat(_: ?*anyopaque, _: File) File.StatError!File.Stat {
-    notImplemented();
+pub fn fileStat(userdata: ?*anyopaque, file: File) File.StatError!File.Stat {
+    const fs = getTestFs(userdata);
+    const vfile = getFile(fs, file.handle) orelse return error.SystemResources;
+    return .{
+        .inode = 0,
+        .nlink = 1,
+        .size = vfile.content.items.len,
+        .permissions = @enumFromInt(0o644),
+        .kind = .file,
+        .atime = null,
+        .mtime = .{ .nanoseconds = 0 },
+        .ctime = .{ .nanoseconds = 0 },
+    };
 }
 
 pub fn fileLength(userdata: ?*anyopaque, file: File) File.LengthError!u64 {

@@ -44,10 +44,12 @@ pub fn getGilaDir(io: std.Io, gpa: std.mem.Allocator) ?struct { []const u8, std.
 }
 
 pub fn searchForGilaDir(io: std.Io, gpa: std.mem.Allocator) ?[]const u8 {
-    const pwd: []const u8 = std.process.getCwdAlloc(gpa) catch |err| {
+    const buffer: []u8 = gpa.alloc(u8, std.fs.max_path_bytes) catch unreachable;
+    const len = std.Io.Dir.cwd().realPath(io, buffer) catch |err| {
         log.err("Failed to get current directory: {s}", .{@errorName(err)});
         return null;
     };
+    const pwd: []const u8 = buffer[0..len];
     log.debug("Current directory: {s}", .{pwd});
     var current_dir: []const u8 = pwd;
 

@@ -12,7 +12,7 @@ const common = @import("common.zig");
 
 const Find = @This();
 
-const Op = enum { @"and", @"or" };
+pub const Op = enum { @"and", @"or" };
 
 priority: ?gila.Priority = null,
 tags: ?struct {
@@ -97,10 +97,38 @@ pub const help =
     \\
 ;
 
-const TaskList = std.ArrayList([]const u8);
+pub const Entry = struct {
+    path: []const u8,
+    status: gila.Status,
+};
+const TaskList = std.ArrayList(Entry);
 const Transitions = std.StringArrayHashMapUnmanaged([2]gila.Status);
 
 pub fn execute(self: Find, ctx: common.CommandContext) void {
+    const result = self.run(ctx) catch return;
+    var buffer: [4096]u8 = undefined;
+    var writer = std.Io.File.stdout().writer(ctx.io, &buffer);
+
+    writer.interface.writeAll("Tasks found:\n") catch unreachable;
+    for (result.tasks) |task| {
+        writer.interface.print("{s}/{s}\n", .{ result.gila_path, task.path }) catch unreachable;
+    }
+
+    writer.interface.flush() catch unreachable;
+}
+
+pub const Error = error{
+    GilaNotFound,
+    OutOfMemory,
+    DirIterationFailed,
+    FailedToGenerateTaskId,
+    InvalidTask,
+    FailedToWriteTaskDescriptionFile,
+    FailedToOpenEditor,
+    SyncFailed,
+};
+
+pub fn run(self: Find, ctx: common.CommandContext) Error!struct { tasks: []Entry, gila_path: []const u8 } {
     const io = ctx.io;
     const arena = ctx.arena;
     const allocator = arena.allocator();
@@ -108,17 +136,23 @@ pub fn execute(self: Find, ctx: common.CommandContext) void {
         root.log_level = .warn;
     }
 
-    const gila_path, var gila_dir = common.getGilaDir(io, allocator) orelse return;
+    const gila_path, var gila_dir = common.getGilaDir(io, allocator) orelse return Error.GilaNotFound;
     defer gila_dir.close(io);
 
-    const fixed_buffer: []u8 = allocator.alloc(u8, 128 * 1024) catch unreachable;
+    const Sync = @import("sync.zig");
+    const sync = Sync{};
+    const transitions, const updates = sync.run(ctx) catch return Error.SyncFailed;
+    for (transitions) |transition| {
+        log.info("Moved {s}: {s} -> {s}", .{ transition.task_id, @tagName(transition.from), @tagName(transition.to) });
+    }
+    for (updates) |update| {
+        log.info("Updated {s}: {s}: {s}", .{ update.task_id, update.change, update.dependency });
+    }
+
+    const fixed_buffer: []u8 = try allocator.alloc(u8, 128 * 1024);
     var local_arena = stdx.Arena.initBuffer(fixed_buffer);
 
-    const task_buffer: [][]const u8 = arena.pushArray([]const u8, 1024);
-    var tasks = TaskList.initBuffer(task_buffer);
-
-    var transitions: Transitions = .empty;
-    transitions.ensureUnusedCapacity(allocator, 1024) catch unreachable;
+    var tasks = try TaskList.initCapacity(arena.allocator(), 1024);
 
     inline for (std.meta.fieldNames(gila.Status)) |field| {
         var dir_n: ?std.Io.Dir = gila_dir.openDir(io, field, .{ .iterate = true }) catch null;
@@ -126,27 +160,24 @@ pub fn execute(self: Find, ctx: common.CommandContext) void {
             var dir_walker = dir.iterateAssumeFirstIteration();
             while (dir_walker.next(io) catch |err| {
                 log.err("Failed to iterate over done directory: {s}", .{@errorName(err)});
-                return;
+                return Error.DirIterationFailed;
             }) |entry| {
                 defer local_arena.reset(false);
                 if (entry.kind == .directory) {
                     if (gila.id.isValid(entry.name)) {
                         var buffer: [1024]u8 = undefined;
                         const file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{entry.name}) catch unreachable;
-                        const path = std.fs.path.join(local_arena.allocator(), &.{ entry.name, file_name }) catch unreachable;
+                        const path = try std.fs.path.join(local_arena.allocator(), &.{ entry.name, file_name });
                         const file = dir.openFile(io, path, .{}) catch continue;
                         defer file.close(io);
 
                         const folder = std.meta.stringToEnum(gila.Status, field) orelse unreachable;
-                        const task = parseTask(&local_arena, entry.name, file_name, io, folder, gila_dir, file, &transitions) catch continue;
+                        const task = parseTask(&local_arena, entry.name, file_name, io, folder, gila_dir, file) catch continue;
 
                         if (task) |t| {
                             if (self.testTask(t)) {
-                                const full_path = std.fs.path.join(arena.allocator(), &.{ gila_path, field, path }) catch unreachable;
-                                tasks.append(arena.allocator(), full_path) catch {
-                                    log.err("Ran out of memory while appending task name", .{});
-                                    return;
-                                };
+                                const full_path = std.fs.path.join(arena.allocator(), &.{ field, path }) catch unreachable;
+                                try tasks.append(arena.allocator(), .{ .path = full_path, .status = folder });
                             }
                         }
                     }
@@ -155,28 +186,12 @@ pub fn execute(self: Find, ctx: common.CommandContext) void {
         }
     }
 
-    var buffer: [4096]u8 = undefined;
-    var writer = std.Io.File.stdout().writer(io, &buffer);
-    var iter = transitions.iterator();
-
-    writer.interface.writeAll("Tasks found:\n") catch unreachable;
-    while (tasks.pop()) |task_name| {
-        writer.interface.print("{s}\n", .{task_name}) catch unreachable;
-    }
-
-    if (transitions.count() != 0) {
-        writer.interface.writeAll("\n") catch unreachable;
-
-        writer.interface.writeAll("Tasks transitioned in the process of finding:\n") catch unreachable;
-        while (iter.next()) |entry| {
-            writer.interface.print("Moved {s}: {t} -> {t}\n", .{ entry.key_ptr.*, entry.value_ptr[0], entry.value_ptr[1] }) catch unreachable;
-        }
-    }
-    writer.interface.flush() catch unreachable;
+    return .{ .tasks = try tasks.toOwnedSlice(arena.allocator()), .gila_path = gila_path };
 }
 
 const find = common.findString;
 pub fn testTask(self: Find, task: gila.Task) bool {
+    if (self.priority == null and self.tags == null and self.waiting_on == null) return true;
     if (self.priority) |priority| {
         if (priority == task.priority) return true;
     }
@@ -229,7 +244,6 @@ pub fn parseTask(
     folder: gila.Status,
     gila_dir: std.Io.Dir,
     task_file: std.Io.File,
-    transitions: *Transitions,
 ) !?gila.Task {
     var task = gila.Task.init(task_name) catch unreachable;
     task.fromFile(task_file, io, arena) catch return null;
@@ -265,11 +279,7 @@ pub fn parseTask(
             .err => {
                 return null;
             },
-            .moved => |to_state| switch (to_state) {
-                inline else => |s| {
-                    transitions.put(arena.allocator(), task_name, [_]gila.Status{ folder, s }) catch unreachable;
-                },
-            },
+            .moved => {},
         }
     }
     return task;

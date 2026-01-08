@@ -228,3 +228,159 @@ pub fn getU8(params: std.json.ObjectMap, key: []const u8) ?u8 {
         else => null,
     };
 }
+
+pub fn getU64(params: std.json.ObjectMap, key: []const u8) ?u64 {
+    const val = params.get(key) orelse return null;
+    return switch (val) {
+        .integer => |i| if (i >= 0) @intCast(i) else null,
+        else => null,
+    };
+}
+
+pub const Op = @import("find.zig").Op;
+
+pub fn getOp(params: std.json.ObjectMap, key: []const u8) Op {
+    const val = params.get(key) orelse return .@"or";
+    return switch (val) {
+        .string => |s| std.meta.stringToEnum(Op, s) orelse .@"or",
+        else => .@"or",
+    };
+}
+
+pub const Field = enum {
+    id,
+    status,
+    title,
+    priority,
+    priority_value,
+    owner,
+    created,
+    completed,
+    description,
+    tags,
+    waiting_on,
+    file_path,
+};
+
+pub const default_fields: []const Field = &.{ .id, .status, .title };
+
+pub fn getFields(params: std.json.ObjectMap, allocator: std.mem.Allocator) []const Field {
+    const val = params.get("fields") orelse return default_fields;
+    return switch (val) {
+        .array => |arr| {
+            var result = allocator.alloc(Field, arr.items.len) catch return default_fields;
+            var count: usize = 0;
+            for (arr.items) |item| {
+                switch (item) {
+                    .string => |s| {
+                        if (std.meta.stringToEnum(Field, s)) |f| {
+                            result[count] = f;
+                            count += 1;
+                        }
+                    },
+                    else => {},
+                }
+            }
+            if (count == 0) return default_fields;
+            return result[0..count];
+        },
+        else => default_fields,
+    };
+}
+
+pub fn hasField(fields: []const Field, field: Field) bool {
+    for (fields) |f| {
+        if (f == field) return true;
+    }
+    return false;
+}
+
+pub fn writeTaskFields(jw: *std.json.Stringify, task: gila.Task, file_path: []const u8, fields: []const Field) !void {
+    try jw.beginObject();
+
+    if (hasField(fields, .id)) {
+        try jw.objectField("id");
+        try jw.write(task.id);
+    }
+
+    if (hasField(fields, .title)) {
+        try jw.objectField("title");
+        try jw.write(task.title);
+    }
+
+    if (hasField(fields, .status)) {
+        try jw.objectField("status");
+        try jw.write(@tagName(task.status));
+    }
+
+    if (hasField(fields, .priority)) {
+        try jw.objectField("priority");
+        try jw.write(@tagName(task.priority));
+    }
+
+    if (hasField(fields, .priority_value)) {
+        try jw.objectField("priority_value");
+        try jw.write(task.priority_value);
+    }
+
+    if (hasField(fields, .owner)) {
+        try jw.objectField("owner");
+        try jw.write(task.owner);
+    }
+
+    if (hasField(fields, .created)) {
+        try jw.objectField("created");
+        var created_buf: [32]u8 = undefined;
+        const created_str = try std.fmt.bufPrint(&created_buf, "{f}", .{task.created.as(.@"YYYY-MM-DDTHH:MM:SSZ")});
+        try jw.write(created_str);
+    }
+
+    if (hasField(fields, .completed)) {
+        try jw.objectField("completed");
+        if (task.completed) |completed| {
+            var completed_buf: [32]u8 = undefined;
+            const completed_str = try std.fmt.bufPrint(&completed_buf, "{f}", .{completed.as(.@"YYYY-MM-DDTHH:MM:SSZ")});
+            try jw.write(completed_str);
+        } else {
+            try jw.write(null);
+        }
+    }
+
+    if (hasField(fields, .tags)) {
+        try jw.objectField("tags");
+        if (task.tags) |tags| {
+            try jw.beginArray();
+            for (tags) |tag| {
+                try jw.write(tag);
+            }
+            try jw.endArray();
+        } else {
+            try jw.write(null);
+        }
+    }
+
+    if (hasField(fields, .waiting_on)) {
+        try jw.objectField("waiting_on");
+        if (task.waiting_on) |waiting_on| {
+            try jw.beginArray();
+            for (waiting_on) |item| {
+                try jw.write(item);
+            }
+            try jw.endArray();
+        } else {
+            try jw.write(null);
+        }
+    }
+
+    if (hasField(fields, .description)) {
+        try jw.objectField("description");
+        try jw.write(task.description);
+    }
+
+    if (hasField(fields, .file_path)) {
+        try jw.objectField("file_path");
+        try jw.write(file_path);
+    }
+
+    try jw.endObject();
+}

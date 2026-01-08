@@ -74,6 +74,21 @@ pub const help =
 ;
 
 pub fn execute(self: Todo, ctx: common.CommandContext) void {
+    const result = self.run(ctx) catch return;
+    var stdout = std.Io.File.stdout().writer(ctx.io, &.{});
+    stdout.interface.print("New task created: {s}\n", .{result.task_id}) catch unreachable;
+    return;
+}
+
+const Error = error{
+    GilaNotFound,
+    OutOfMemory,
+    FailedToGenerateTaskId,
+    InvalidTask,
+    FailedToWriteTaskDescriptionFile,
+    FailedToOpenEditor,
+};
+pub fn run(self: Todo, ctx: common.CommandContext) !struct { task_id: []const u8, description_file: []const u8, status: gila.Status } {
     const io = ctx.io;
     const arena = ctx.arena;
     const allocator = arena.allocator();
@@ -81,12 +96,12 @@ pub fn execute(self: Todo, ctx: common.CommandContext) void {
         root.log_level = .warn;
     }
 
-    const gila_path, var gila_dir = common.getGilaDir(io, allocator) orelse return;
+    const gila_path, var gila_dir = common.getGilaDir(io, allocator) orelse return Error.GilaNotFound;
     defer gila_dir.close(io);
 
     const task_name = gila.id.new(allocator) catch |err| {
         log.err("Failed to get create task id: {s}", .{@errorName(err)});
-        return;
+        return Error.FailedToGenerateTaskId;
     };
     log.debug("Generated task_id: {s}", .{task_name});
 
@@ -145,10 +160,10 @@ pub fn execute(self: Todo, ctx: common.CommandContext) void {
     var error_out: ?[]const u8 = null;
     task.validate(&error_out) catch {
         log.err("Failed to validate task description file {s}: {s}", .{ task_name, error_out.? });
-        return;
+        return Error.InvalidTask;
     };
 
-    const description_file = task.toTaskFile(io, true, arena, gila_dir) catch return;
+    const description_file = task.toTaskFile(io, true, arena, gila_dir) catch return Error.FailedToWriteTaskDescriptionFile;
     log.debug("Successfully wrote task description file {s}", .{description_file});
 
     if (self.blocks) |blocks| {
@@ -189,15 +204,17 @@ pub fn execute(self: Todo, ctx: common.CommandContext) void {
                 blocked_task.waiting_on = new_list;
             }
 
-            blocked_task.transition(.waiting) catch |err| {
-                log.err("Failed to transition task {s} to waiting: {s}", .{ task_id, @errorName(err) });
-                continue;
-            };
+            if (blocked_task.status != .waiting) {
+                blocked_task.transition(.waiting) catch |err| {
+                    log.err("Failed to transition task {s} to waiting: {s}", .{ task_id, @errorName(err) });
+                    continue;
+                };
 
-            common.moveTaskData(io, local_arena.allocator(), gila_dir, task_id, result.status, .waiting) catch |err| {
-                log.err("Failed to move task {s} to waiting: {s}", .{ task_id, @errorName(err) });
-                continue;
-            };
+                common.moveTaskData(io, local_arena.allocator(), gila_dir, task_id, result.status, .waiting) catch |err| {
+                    log.err("Failed to move task {s} to waiting: {s}", .{ task_id, @errorName(err) });
+                    continue;
+                };
+            }
 
             _ = blocked_task.toTaskFile(io, false, &local_arena, gila_dir) catch |err| {
                 log.err("Failed to write task {s}: {s}", .{ task_id, @errorName(err) });
@@ -212,21 +229,16 @@ pub fn execute(self: Todo, ctx: common.CommandContext) void {
     if (self.edit) {
         const editor_name = ctx.editor;
 
-        const file_name = std.fs.path.join(allocator, &.{ gila_path, description_file }) catch |err| {
-            log.err("Unexpected error while joining path: {s}", .{@errorName(err)});
-            return;
-        };
+        const file_name = try std.fs.path.join(allocator, &.{ gila_path, description_file });
         var result = std.process.run(std.heap.page_allocator, io, .{ .argv = &.{ editor_name, "+", file_name } }) catch |err| {
             log.err("Failed to open editor: {s}", .{@errorName(err)});
-            return;
+            return Error.FailedToOpenEditor;
         };
         log.debug("Opened editor {s} at {f}", .{ editor_name, stdx.DateTimeUTC.now() });
         log.debug("Editor exited with code {any} at {f}", .{ result.term, stdx.DateTimeUTC.now() });
     }
 
-    var stdout = std.Io.File.stdout().writer(io, &.{});
-    stdout.interface.print("New task created: {s}\n", .{task_name}) catch unreachable;
-    return;
+    return .{ .task_id = task.id, .description_file = description_file, .status = task.status };
 }
 
 const testing = std.testing;

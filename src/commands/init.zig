@@ -42,10 +42,11 @@ pub fn execute(self: @This(), io: std.Io, arena: *stdx.Arena) void {
     const allocator = arena.allocator();
     const buffer: []u8 = allocator.alloc(u8, std.fs.max_path_bytes) catch unreachable;
 
-    var current_dir: []const u8 = std.process.getCwd(buffer) catch |err| {
+    const len = std.Io.Dir.cwd().realPath(io, buffer) catch |err| {
         log.err("Failed to get current directory: {s}", .{@errorName(err)});
         return;
     };
+    var current_dir: []const u8 = buffer[0..len];
 
     if (self.positional.directory) |directory| {
         if (std.fs.path.isAbsolute(directory)) {

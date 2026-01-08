@@ -205,6 +205,8 @@ pub fn resolvePath(root: *VirtualDir, base_dir: ?*VirtualDir, path: []const u8) 
 pub fn resolveParentAndName(root: *VirtualDir, base_dir: ?*VirtualDir, path: []const u8) ?struct { parent: *VirtualDir, name: []const u8 } {
     if (path.len == 0) return null;
 
+    // NOTE(adi): When the path starts with a '/' it is to be treated as absolute. Tested this on posix and thats the behavior
+    // of the file system.
     const is_absolute = path[0] == '/';
     const last_slash = std.mem.lastIndexOfScalar(u8, path, '/');
 

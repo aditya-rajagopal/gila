@@ -7,13 +7,14 @@ const stdx = @import("stdx");
 const flags = stdx.flags;
 const zon = @import("zon");
 
+const common = @import("commands/common.zig");
 const Todo = @import("commands/todo.zig");
 const Init = @import("commands/init.zig");
 const Done = @import("commands/done.zig");
 const Sync = @import("commands/sync.zig");
 const Tui = @import("commands/tui.zig");
 const Find = @import("commands/find.zig");
-const Server = @import("commands/server.zig");
+// const Server = @import("commands/server.zig");
 
 pub const std_options: std.Options = .{
     .log_level = default_log_level,
@@ -75,7 +76,7 @@ const CLIArgs = union(enum) {
     sync: Sync,
     tui: Tui,
     find: Find,
-    server: Server,
+    // server: Server,
     version,
 
     pub const help =
@@ -123,15 +124,28 @@ const CLIArgs = union(enum) {
     ;
 };
 
-pub fn main() void {
+pub fn main(env: std.process.Init.Minimal) void {
     var stack_space: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&stack_space);
+
+    const user_env = if (builtin.os.tag == .windows) "USERNAME" else "USER";
+    const editr = "EDITOR";
+
+    const username = env.environ.getAlloc(arena.allocator(), user_env) catch unreachable;
+    const editor = env.environ.getAlloc(arena.allocator(), editr) catch "vim";
 
     var threaded = std.Io.Threaded.init_single_threaded;
     const io = threaded.ioBasic();
 
-    var args = std.process.argsWithAllocator(arena.allocator()) catch |err| {
-        var stderr = std.fs.File.stderr().writer(&.{});
+    const context = common.CommandContext{
+        .io = io,
+        .arena = &arena,
+        .username = username,
+        .editor = editor,
+    };
+
+    var args = env.args.iterateAllocator(arena.allocator()) catch |err| {
+        var stderr = std.Io.File.stderr().writer(io, &.{});
         stderr.interface.print("Failed to get args: {s}\n", .{@errorName(err)}) catch unreachable;
         return;
     };
@@ -139,13 +153,13 @@ pub fn main() void {
     const cli = flags.parseArgs(io, arena.allocator(), &args, CLIArgs);
 
     switch (cli) {
-        .init => |init| init.execute(io, &arena),
-        .todo => |todo| todo.execute(io, &arena),
-        .done => |done| done.execute(io, &arena),
-        .sync => |sync| sync.execute(io, &arena),
-        .tui => |tui| tui.execute(io, &arena),
-        .find => |find| find.execute(io, &arena),
-        .server => |server| server.execute(io, &arena),
+        .init => |init| init.execute(context),
+        .todo => |todo| todo.execute(context),
+        .done => |done| done.execute(context),
+        .sync => |sync| sync.execute(context),
+        .tui => |tui| tui.execute(context),
+        .find => |find| find.execute(context),
+        // .server => |server| server.execute(context),
         .version => {
             var stdout = std.Io.File.stdout().writer(io, &.{});
             stdout.interface.print("v{s}\n", .{zon.version}) catch |err| {

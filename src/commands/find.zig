@@ -100,7 +100,9 @@ pub const help =
 const TaskList = std.ArrayList([]const u8);
 const Transitions = std.StringArrayHashMapUnmanaged([2]gila.Status);
 
-pub fn execute(self: Find, io: std.Io, arena: *stdx.Arena) void {
+pub fn execute(self: Find, ctx: common.CommandContext) void {
+    const io = ctx.io;
+    const arena = ctx.arena;
     const allocator = arena.allocator();
     if (!self.verbose) {
         root.log_level = .warn;
@@ -336,7 +338,13 @@ test "by priority" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     const stdout = fs.getStdout();
     try testing.expect(std.mem.indexOf(u8, stdout, "high_pri_abc") != null);
@@ -414,7 +422,13 @@ test "by tags with or" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     const stdout = fs.getStdout();
     try testing.expect(std.mem.indexOf(u8, stdout, "feature_tsk_abc") != null);
@@ -478,7 +492,13 @@ test "by tags with and" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     const stdout = fs.getStdout();
     try testing.expect(std.mem.indexOf(u8, stdout, "both_tags_abc") != null);
@@ -503,7 +523,13 @@ test "no matches" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     try expectStdoutContains(fs, "Tasks found:");
     const stdout = fs.getStdout();

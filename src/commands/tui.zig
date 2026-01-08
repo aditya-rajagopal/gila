@@ -17,9 +17,9 @@ const Tui = @This();
 
 verbose: bool = false,
 
-pub fn execute(self: Tui, io: std.Io, arena: *stdx.Arena) void {
+pub fn execute(self: Tui, ctx: common.CommandContext) void {
+    const io = ctx.io;
     _ = self;
-    _ = arena;
 
     var write_buffer: [4096]u8 align(4096) = undefined;
     var config: TerminalConfig = .tui_default;

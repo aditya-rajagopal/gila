@@ -6,6 +6,8 @@ const stdx = @import("stdx");
 
 const log = std.log.scoped(.init);
 
+const common = @import("common.zig");
+
 bare: bool = false,
 verbose: bool = false,
 positional: struct {
@@ -35,14 +37,21 @@ pub const help =
     \\
 ;
 
-pub fn execute(self: @This(), io: std.Io, arena: *stdx.Arena) void {
+pub fn execute(self: @This(), ctx: common.CommandContext) void {
+    const io = ctx.io;
+    const arena = ctx.arena;
     if (!self.verbose) {
         root.log_level = .warn;
     }
     const allocator = arena.allocator();
     const buffer: []u8 = allocator.alloc(u8, std.fs.max_path_bytes) catch unreachable;
 
-    const len = std.Io.Dir.cwd().realPath(io, buffer) catch |err| {
+    const cwd = std.Io.Dir.cwd().openDir(io, ".", .{}) catch |err| {
+        log.err("Failed to open current directory: {s}", .{@errorName(err)});
+        return;
+    };
+    defer cwd.close(io);
+    const len = cwd.realPath(io, buffer) catch |err| {
         log.err("Failed to get current directory: {s}", .{@errorName(err)});
         return;
     };
@@ -118,7 +127,13 @@ test "creates gila directory" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     try testing.expect(fs.dirExists(".gila"));
     try testing.expect(fs.dirExists(".gila/todo"));
@@ -138,7 +153,13 @@ test "bare mode" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     try testing.expect(fs.dirExists(".gila"));
     try testing.expect(!fs.dirExists(".gila/todo"));
@@ -160,7 +181,13 @@ test "already exists" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     const stdout = fs.getStdout();
     try std.testing.expectEqual(0, stdout.len);
@@ -178,7 +205,13 @@ test "directory" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     try testing.expect(fs.dirExists("/home/.gila"));
     try testing.expect(fs.dirExists("/home/.gila/todo"));

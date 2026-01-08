@@ -50,8 +50,10 @@ pub const help =
 ;
 
 // @LEFTOFF make the configuration for arena size, line buffer size, etc configurable
-pub fn execute(self: Server, io: std.Io, arena: *stdx.Arena) void {
-    root.log_level = .err;
+pub fn execute(self: Server, ctx: common.CommmandContext) void {
+    const io = ctx.io;
+    const arena = ctx.arena;
+    root.log_level = .debug;
 
     const gila_path, var gila_dir = common.getGilaDir(io, arena.allocator()) orelse {
         rpc.sendStartupError(io, rpc.ErrorCode.gila_dir_not_found, "GILA directory not found. Run 'gila init' first.");

@@ -5,6 +5,7 @@ const stdx = @import("stdx");
 const TestFs = @import("../testfs/root.zig").TestFs;
 const test_utils = @import("test_utils.zig");
 
+const common = @import("common.zig");
 const Init = @import("init.zig");
 const Todo = @import("todo.zig");
 const Done = @import("done.zig");
@@ -29,7 +30,13 @@ test "init -> todo -> done" {
         .verbose = false,
         .positional = .{ .directory = null },
     };
-    init_cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    init_cmd.execute(context);
     try expectStdoutContains(fs, "Initialized GILA project:");
     fs.clearStdout();
 
@@ -46,7 +53,7 @@ test "init -> todo -> done" {
     };
 
     arena.reset(false);
-    todo_cmd.execute(fs.io(), &arena);
+    todo_cmd.execute(context);
 
     try expectStdoutContains(fs, "New task created:");
     const task_id_raw = extractTaskId(fs.getStdout()) orelse return error.TaskIdNotFound;
@@ -70,7 +77,7 @@ test "init -> todo -> done" {
     };
 
     arena.reset(false);
-    done_cmd.execute(fs.io(), &arena);
+    done_cmd.execute(context);
 
     try expectStdoutContains(fs, "Successfully completed task");
     try expectStdoutContains(fs, "Great success!");
@@ -117,12 +124,19 @@ test "waiting dependency chain" {
     try testing.expectEqual(gila.Status.waiting, task_b_initial.status);
     try testing.expect(task_b_initial.waiting_on != null);
 
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+
     const done_cmd: Done = .{
         .verbose = false,
         .edit = false,
         .positional = .{ .task = "task_a_abc" },
     };
-    done_cmd.execute(fs.io(), &arena);
+    done_cmd.execute(context);
     try expectStdoutContains(fs, "Successfully completed task task_a_abc");
     fs.clearStdout();
 
@@ -136,7 +150,7 @@ test "waiting dependency chain" {
     };
 
     arena.reset(false);
-    sync_cmd.execute(fs.io(), &arena);
+    sync_cmd.execute(context);
 
     try testing.expect(!fs.dirExists(".gila/waiting/task_b_abc"));
     try testing.expect(fs.dirExists(".gila/todo/task_b_abc"));

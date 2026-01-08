@@ -51,7 +51,9 @@ const TaskSets = struct {
     };
 };
 
-pub fn execute(self: Sync, io: std.Io, arena: *stdx.Arena) void {
+pub fn execute(self: Sync, ctx: common.CommandContext) void {
+    const io = ctx.io;
+    const arena = ctx.arena;
     // @TODO [[massive_raid_664]]
     const allocator = arena.allocator();
     if (!self.verbose) {
@@ -405,7 +407,13 @@ test "file status overrides folder" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     try testing.expect(!fs.dirExists(".gila/todo/misplaced_tsk_abc"));
     try testing.expect(fs.dirExists(".gila/started/misplaced_tsk_abc"));
@@ -461,7 +469,13 @@ test "waiting task with done deps" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     try testing.expect(!fs.dirExists(".gila/waiting/wait_task_abc"));
     try testing.expect(fs.dirExists(".gila/todo/wait_task_abc"));
@@ -514,7 +528,13 @@ test "multiple transitions" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     try testing.expect(fs.dirExists(".gila/started/task_one_abc"));
     try testing.expect(fs.dirExists(".gila/done/task_two_abc"));
@@ -546,7 +566,13 @@ test "no changes needed" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     const stdout = fs.getStdout();
     try testing.expect(std.mem.indexOf(u8, stdout, "Moved") == null);
@@ -612,7 +638,13 @@ test "waiting task all deps done" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     try testing.expect(!fs.dirExists(".gila/waiting/multi_wait_abc"));
     try testing.expect(fs.dirExists(".gila/todo/multi_wait_abc"));
@@ -650,7 +682,13 @@ test "preserves custom frontmatter" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     try testing.expect(fs.dirExists(".gila/started/custom_syn_abc"));
 

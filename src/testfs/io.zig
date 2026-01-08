@@ -772,6 +772,38 @@ pub fn netLookup(_: ?*anyopaque, _: Io.net.HostName, _: *Io.Queue(Io.net.HostNam
     notImplemented();
 }
 
+pub fn fileHardLink(_: ?*anyopaque, _: File, _: Dir, _: []const u8, _: File.HardLinkOptions) File.HardLinkError!void {
+    notImplemented();
+}
+
+pub fn processReplace(_: ?*anyopaque, _: std.process.ReplaceOptions) std.process.ReplaceError {
+    notImplemented();
+}
+
+pub fn processReplacePath(_: ?*anyopaque, _: Dir, _: std.process.ReplaceOptions) std.process.ReplaceError {
+    notImplemented();
+}
+
+pub fn processSpawn(_: ?*anyopaque, _: std.process.SpawnOptions) std.process.SpawnError!std.process.Child {
+    notImplemented();
+}
+pub fn processSpawnPath(_: ?*anyopaque, _: Dir, _: std.process.SpawnOptions) std.process.SpawnError!std.process.Child {
+    notImplemented();
+}
+pub fn childWait(_: ?*anyopaque, _: *std.process.Child) std.process.Child.WaitError!std.process.Child.Term {
+    notImplemented();
+}
+pub fn childKill(_: ?*anyopaque, _: *std.process.Child) void {
+    notImplemented();
+}
+pub fn progressParentFile(_: ?*anyopaque) std.Progress.ParentFileError!File {
+    notImplemented();
+}
+
+pub fn dirCreateFileAtomic(_: ?*anyopaque, _: Dir, _: []const u8, _: Dir.CreateFileAtomicOptions) Dir.CreateFileAtomicError!File.Atomic {
+    notImplemented();
+}
+
 pub const vtable = Io.VTable{
     .async = asyncFn,
     .concurrent = concurrent,
@@ -860,4 +892,13 @@ pub const vtable = Io.VTable{
     .netInterfaceNameResolve = netInterfaceNameResolve,
     .netInterfaceName = netInterfaceName,
     .netLookup = netLookup,
+    .fileHardLink = fileHardLink,
+    .processReplace = processReplace,
+    .processReplacePath = processReplacePath,
+    .processSpawn = processSpawn,
+    .processSpawnPath = processSpawnPath,
+    .childWait = childWait,
+    .childKill = childKill,
+    .progressParentFile = progressParentFile,
+    .dirCreateFileAtomic = dirCreateFileAtomic,
 };

@@ -6,10 +6,12 @@ const builtin = @import("builtin");
 const gila = @import("gila");
 const stdx = @import("stdx");
 
-pub fn getUserName(gpa: std.mem.Allocator) ![]const u8 {
-    const user_env = if (builtin.os.tag == .windows) "USERNAME" else "USER";
-    return std.process.getEnvVarOwned(gpa, user_env);
-}
+pub const CommandContext = struct {
+    io: std.Io,
+    arena: *stdx.Arena,
+    username: []const u8,
+    editor: []const u8,
+};
 
 pub fn findString(haystack: []const []const u8, needle: []const u8) bool {
     for (haystack) |item| {
@@ -52,13 +54,17 @@ pub fn getGilaDir(io: std.Io, gpa: std.mem.Allocator) ?struct { []const u8, std.
 
 pub fn searchForGilaDir(io: std.Io, gpa: std.mem.Allocator) ?[]const u8 {
     const buffer: []u8 = gpa.alloc(u8, std.fs.max_path_bytes) catch unreachable;
-    const len = std.Io.Dir.cwd().realPath(io, buffer) catch |err| {
+    const cwd = std.Io.Dir.cwd().openDir(io, ".", .{}) catch |err| {
+        log.err("Failed to open current directory: {s}", .{@errorName(err)});
+        return null;
+    };
+    defer cwd.close(io);
+    const len = cwd.realPath(io, buffer) catch |err| {
         log.err("Failed to get current directory: {s}", .{@errorName(err)});
         return null;
     };
-    const pwd: []const u8 = buffer[0..len];
-    log.debug("Current directory: {s}", .{pwd});
-    var current_dir: []const u8 = pwd;
+    var current_dir: []const u8 = buffer[0..len];
+    log.debug("Current directory: {s}", .{current_dir});
 
     outter_loop: for (0..128) |_| {
         var dir = std.Io.Dir.openDirAbsolute(io, current_dir, .{ .iterate = true }) catch |err| {
@@ -80,7 +86,7 @@ pub fn searchForGilaDir(io: std.Io, gpa: std.mem.Allocator) ?[]const u8 {
             }
         }
         current_dir = std.fs.path.dirname(current_dir) orelse {
-            log.err("Failed to find a valid .gila directory in '{s}' and its parents. Please use `gila init`", .{pwd});
+            log.err("Failed to find a valid .gila directory in '{s}' and its parents. Please use `gila init`", .{current_dir});
             return null;
         };
     }

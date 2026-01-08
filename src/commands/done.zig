@@ -42,7 +42,9 @@ pub const help =
     \\
 ;
 
-pub fn execute(self: Done, io: std.Io, arena: *stdx.Arena) void {
+pub fn execute(self: Done, ctx: common.CommandContext) void {
+    const io = ctx.io;
+    const arena = ctx.arena;
     const allocator = arena.allocator();
     if (!self.verbose) {
         root.log_level = .warn;
@@ -111,18 +113,13 @@ pub fn execute(self: Done, io: std.Io, arena: *stdx.Arena) void {
 
         log.debug("File path for editor: {s}", .{file_name});
         // @TODO make the default editor configurable
-        const editor_name = std.process.getEnvVarOwned(allocator, "EDITOR") catch "vim";
-        var editor = std.process.Child.init(&.{ editor_name, "+", file_name }, std.heap.page_allocator);
-        editor.spawn(io) catch |err| {
-            log.err("Failed to spawn editor {s}: {s}", .{ editor_name, @errorName(err) });
-            return;
-        };
-        log.debug("Opened editor {s} at {f}", .{ editor_name, stdx.DateTimeUTC.now() });
-        const exit_code = editor.wait(io) catch |err| {
+        const editor_name = ctx.editor;
+
+        const res = std.process.run(std.heap.page_allocator, io, .{ .argv = &.{ editor_name, "+", file_name } }) catch |err| {
             log.err("Failed to open editor: {s}", .{@errorName(err)});
             return;
         };
-        log.debug("Editor exited with code {any} at {f}", .{ exit_code, stdx.DateTimeUTC.now() });
+        log.debug("Editor exited with code {any} at {f}", .{ res.term, stdx.DateTimeUTC.now() });
     }
 }
 
@@ -152,7 +149,14 @@ test "marks todo task as done" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+
+    cmd.execute(context);
 
     try expectStdoutContains(fs, "Successfully completed task done_task_abc. Great success!");
     try testing.expect(fs.dirExists(".gila/done/done_task_abc"));
@@ -184,7 +188,14 @@ test "invalid task id" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+
+    cmd.execute(context);
 
     const stdout = fs.getStdout();
     try testing.expectEqual(0, stdout.len);
@@ -220,7 +231,13 @@ test "already done task" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     const stdout = fs.getStdout();
     try testing.expect(std.mem.indexOf(u8, stdout, "Successfully completed task") == null);
@@ -257,7 +274,13 @@ test "task with waiting_on" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     const stdout = fs.getStdout();
     try testing.expect(std.mem.indexOf(u8, stdout, "Successfully completed task") == null);
@@ -297,7 +320,13 @@ test "preserves custom frontmatter" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     try expectStdoutContains(fs, "Successfully completed task");
 

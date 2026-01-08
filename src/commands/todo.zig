@@ -73,7 +73,9 @@ pub const help =
     \\
 ;
 
-pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
+pub fn execute(self: Todo, ctx: common.CommandContext) void {
+    const io = ctx.io;
+    const arena = ctx.arena;
     const allocator = arena.allocator();
     if (!self.verbose) {
         root.log_level = .warn;
@@ -88,10 +90,7 @@ pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
     };
     log.debug("Generated task_id: {s}", .{task_name});
 
-    const user_name = common.getUserName(allocator) catch |err| {
-        log.err("Failed to get user name: {s}", .{@errorName(err)});
-        return;
-    };
+    const user_name = ctx.username;
     const creation_dt = stdx.DateTimeUTC.now();
 
     const waiting_on: ?[]const []const u8 = if (self.waiting_on) |waiting_on| blk: {
@@ -211,23 +210,18 @@ pub fn execute(self: Todo, io: std.Io, arena: *stdx.Arena) void {
 
     // @TODO make the default editor configurable
     if (self.edit) {
-        const editor_name = std.process.getEnvVarOwned(allocator, "EDITOR") catch "vim";
+        const editor_name = ctx.editor;
 
         const file_name = std.fs.path.join(allocator, &.{ gila_path, description_file }) catch |err| {
             log.err("Unexpected error while joining path: {s}", .{@errorName(err)});
             return;
         };
-        var editor = std.process.Child.init(&.{ editor_name, "+", file_name }, std.heap.page_allocator);
-        editor.spawn(io) catch |err| {
-            log.err("Failed to spawn editor {s}: {s}", .{ editor_name, @errorName(err) });
-            return;
-        };
-        log.debug("Opened editor {s} at {f}", .{ editor_name, stdx.DateTimeUTC.now() });
-        const exit_code = editor.wait(io) catch |err| {
+        var result = std.process.run(std.heap.page_allocator, io, .{ .argv = &.{ editor_name, "+", file_name } }) catch |err| {
             log.err("Failed to open editor: {s}", .{@errorName(err)});
             return;
         };
-        log.debug("Editor exited with code {any} at {f}", .{ exit_code, stdx.DateTimeUTC.now() });
+        log.debug("Opened editor {s} at {f}", .{ editor_name, stdx.DateTimeUTC.now() });
+        log.debug("Editor exited with code {any} at {f}", .{ result.term, stdx.DateTimeUTC.now() });
     }
 
     var stdout = std.Io.File.stdout().writer(io, &.{});
@@ -272,7 +266,13 @@ test "basic task creation" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     try expectStdoutContains(fs, "New task created:");
 
@@ -330,7 +330,13 @@ test "with waiting_on creates waiting task" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     const task_id = extractTaskId(fs.getStdout()) orelse return error.TaskIdNotFound;
 
@@ -371,7 +377,13 @@ test "with blocks transitions blocked task" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     try expectStdoutContains(fs, "New task created:");
     const task_id = extractTaskId(fs.getStdout()) orelse return error.TaskIdNotFound;
@@ -413,7 +425,13 @@ test "no gila directory" {
     var arena_buffer: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&arena_buffer);
 
-    cmd.execute(fs.io(), &arena);
+    const context = common.CommandContext{
+        .io = fs.io(),
+        .arena = &arena,
+        .username = "testuser",
+        .editor = "vim",
+    };
+    cmd.execute(context);
 
     const stdout = fs.getStdout();
     try testing.expectEqual(0, stdout.len);

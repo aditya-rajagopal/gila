@@ -14,7 +14,7 @@ The server uses stdin and stdout for communication:
 - **Output**: Line-delimited JSON-RPC responses, one per line
 - **Encoding**: UTF-8
 
-Start the server with:
+Batch requests with `echo`:
 ```bash
 echo "($cat commands.txt)" | gila server
 ```

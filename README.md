@@ -149,9 +149,8 @@ gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>]
           [--edit] <title>
 
 gila done [-h | --help] [--verbose] [--edit] <task_id>
-gila find [-h | --help] [--priority=<priority>] [--status=<status>]
-          [--tags="<tag1>,<tag2>,..."] [--limit=<number>] [--offset=<number>]
-          [--fields="<field1>,<field2>,..."] [--verbose]
+gila find [--priority=low|medium|high|urgent] [--tags="<[or|and]:><tag1>,<tag2>,..."]
+          [--waiting-on="<[or|and]:><task1>,<task2>,..."] [--verbose]
 gila sync [-h | --help] [--verbose]
 
 gila server [-h | --help] [--run-once]

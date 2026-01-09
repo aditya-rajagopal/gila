@@ -149,21 +149,32 @@ fn handleTaskGet(self: Handler) void {
 
     const task_id = rpc.getString(p.object, "task_id") orelse return self.fail(.invalid_params, "Missing required field: task_id");
     if (!gila.id.isValid(task_id)) return self.fail(.invalid_task_id, "Invalid task ID format");
+    const path_only = rpc.getBool(p.object, "path_only") orelse false;
 
     var find_arena = stdx.Arena.init(allocator, 256 * 1024, null) catch return self.failInternal("Failed to allocate find buffer");
-    const result = gila.Task.findTaskAndRead(task_id, self.io, &find_arena, self.gila_dir) catch return self.fail(.task_not_found, "Task not found");
-
     const task_file = find_arena.pushArray(u8, task_id.len + 3);
     @memcpy(task_file[0..task_id.len], task_id);
     @memcpy(task_file[task_id.len..][0..3], ".md");
-    const rel_path = std.fs.path.join(allocator, &.{ @tagName(result.status), task_id, task_file }) catch return self.failInternal("Failed to build path");
-    const abs_path = std.fs.path.join(allocator, &.{ self.gila_path, rel_path }) catch return self.failInternal("Failed to build path");
-
-    self.resp.begin() catch return self.failResponseWrite();
-    rpc.writeTask(self.resp.writer(), result.task, abs_path) catch return self.failResponseWrite();
-    self.resp.end() catch return self.failResponseWrite();
+    if (path_only) {
+        const result = gila.Task.getTaskFileById(self.io, task_id, &find_arena, self.gila_dir) catch return self.fail(.task_not_found, "Task not found");
+        const abs_path = std.fs.path.join(allocator, &.{ self.gila_path, @tagName(result.folder), task_id, task_file }) catch return self.failInternal("Failed to build path");
+        self.resp.begin() catch return self.failResponseWrite();
+        const jw = self.resp.writer();
+        jw.beginObject() catch return self.failResponseWrite();
+        jw.objectField("file_path") catch return self.failResponseWrite();
+        jw.write(abs_path) catch return self.failResponseWrite();
+        jw.endObject() catch return self.failResponseWrite();
+        self.resp.end() catch return self.failResponseWrite();
+    } else {
+        const result = gila.Task.findTaskAndRead(task_id, self.io, &find_arena, self.gila_dir) catch return self.fail(.task_not_found, "Task not found");
+        const abs_path = std.fs.path.join(allocator, &.{ self.gila_path, @tagName(result.status), task_id, task_file }) catch return self.failInternal("Failed to build path");
+        self.resp.begin() catch return self.failResponseWrite();
+        rpc.writeTask(self.resp.writer(), result.task, abs_path) catch return self.failResponseWrite();
+        self.resp.end() catch return self.failResponseWrite();
+    }
 }
 
+// @TODO missing waiting_on
 fn handleTaskUpdate(self: Handler) void {
     const allocator = self.arena.allocator();
 
@@ -179,10 +190,25 @@ fn handleTaskUpdate(self: Handler) void {
     const old_status = result.status;
 
     if (rpc.getString(p.object, "title")) |new_title| task.title = new_title;
+
     if (rpc.getString(p.object, "description")) |new_desc| task.description = new_desc;
     if (rpc.getPriority(p.object, "priority")) |new_priority| task.priority = new_priority;
     if (rpc.getU8(p.object, "priority_value")) |new_pv| task.priority_value = new_pv;
-    if (rpc.getStringArray(p.object, "tags", allocator)) |new_tags| task.tags = new_tags;
+
+    if (rpc.getStringArray(p.object, "tags", allocator)) |new_tags| {
+        if (task.tags) |tags| {
+            var combined_tags = std.ArrayList([]const u8).initCapacity(allocator, tags.len + new_tags.len) catch return self.failInternal("Failed to allocate tags");
+            combined_tags.appendSliceAssumeCapacity(tags);
+            for (new_tags) |tag| {
+                if (!common.findString(tags, tag)) {
+                    combined_tags.appendAssumeCapacity(tag);
+                }
+            }
+            task.tags = combined_tags.items;
+        } else {
+            task.tags = new_tags;
+        }
+    }
 
     if (rpc.getStatus(p.object, "status")) |new_status| {
         if (new_status != task.status) {
@@ -243,9 +269,7 @@ fn handleShutdown(self: Handler) void {
 fn handleTaskFind(self: Handler) void {
     const allocator = self.arena.allocator();
 
-    const p = self.params orelse {
-        return self.fail(.invalid_params, "Missing params");
-    };
+    const p = self.params orelse return self.fail(.invalid_params, "Missing params");
     if (p != .object) return self.fail(.invalid_params, "Params must be an object");
 
     const filter_priority = rpc.getPriority(p.object, "priority");
@@ -254,8 +278,8 @@ fn handleTaskFind(self: Handler) void {
     const tags_op = rpc.getOp(p.object, "tags_op");
     const filter_waiting_on = rpc.getStringArray(p.object, "waiting_on", allocator);
     const waiting_on_op = rpc.getOp(p.object, "waiting_on_op");
-    const limit = rpc.getU64(p.object, "limit") orelse std.math.maxInt(u64);
-    const offset = rpc.getU64(p.object, "offset") orelse 0;
+    const limit = rpc.getPositiveI64(p.object, "limit") orelse std.math.maxInt(i64);
+    const offset = rpc.getPositiveI64(p.object, "offset") orelse 0;
     const fields = rpc.getFields(p.object, allocator);
 
     var find_arena = stdx.Arena.init(allocator, 512 * 1024, null) catch return self.failInternal("Failed to allocate find buffer");

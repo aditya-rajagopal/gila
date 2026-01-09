@@ -116,7 +116,7 @@ pub const ResponseWriter = struct {
 pub fn writeTask(jw: *std.json.Stringify, task: gila.Task, file_path: []const u8) !void {
     try jw.beginObject();
 
-    try jw.objectField("id");
+    try jw.objectField("task_id");
     try jw.write(task.id);
 
     try jw.objectField("title");
@@ -229,7 +229,15 @@ pub fn getU8(params: std.json.ObjectMap, key: []const u8) ?u8 {
     };
 }
 
-pub fn getU64(params: std.json.ObjectMap, key: []const u8) ?u64 {
+pub fn getBool(params: std.json.ObjectMap, key: []const u8) ?bool {
+    const val = params.get(key) orelse return null;
+    return switch (val) {
+        .bool => |b| b,
+        else => null,
+    };
+}
+
+pub fn getPositiveI64(params: std.json.ObjectMap, key: []const u8) ?i64 {
     const val = params.get(key) orelse return null;
     return switch (val) {
         .integer => |i| if (i >= 0) @intCast(i) else null,
@@ -299,7 +307,7 @@ pub fn writeTaskFields(jw: *std.json.Stringify, task: gila.Task, file_path: []co
     try jw.beginObject();
 
     if (hasField(fields, .id)) {
-        try jw.objectField("id");
+        try jw.objectField("task_id");
         try jw.write(task.id);
     }
 

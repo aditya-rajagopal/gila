@@ -265,7 +265,7 @@ test "task/create: basic task creation" {
     const fs = try TestFs.setup(testing.allocator);
     defer fs.deinit();
 
-    try initGilaProject(fs);
+    try fs.createDir(".gila");
 
     fs.setStdin(
         \\{"jsonrpc":"2.0","method":"task/create","params":{"title":"Test task", "username":"testuser"},"id":1}
@@ -295,6 +295,10 @@ test "task/create: basic task creation" {
     const result_val = root_value.object.get("result") orelse return error.NoResult;
     try std.testing.expect(result_val == .object);
     {
+        const status_val = result_val.object.get("status") orelse return error.NoStatus;
+        try testing.expect(status_val == .string);
+        try testing.expectEqualStrings("todo", status_val.string);
+
         const task_id_val = result_val.object.get("task_id") orelse return error.NoTaskId;
         try std.testing.expect(task_id_val == .string);
         try std.testing.expect(gila.id.isValid(task_id_val.string));
@@ -322,10 +326,6 @@ test "task/create: basic task creation" {
         var full_path_buf: [255]u8 = undefined;
         const full_path = std.fmt.bufPrint(&full_path_buf, "/home/test/{s}", .{file_path}) catch unreachable;
         try testing.expectEqualStrings(full_path, file_path_val.string);
-
-        const status_val = result_val.object.get("status") orelse return error.NoStatus;
-        try testing.expect(status_val == .string);
-        try testing.expectEqualStrings("todo", status_val.string);
     }
 }
 
@@ -346,20 +346,58 @@ test "task/create: with all optional params" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"result\":");
-    try expectResponseContains(response, "\"status\":\"todo\"");
-    try expectResponseContains(response, "\"id\":2");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
 
-    const task_id = try extractTaskIdFromResponse(testing.allocator, response);
-    var file_path_buf: [256]u8 = undefined;
-    const file_path = std.fmt.bufPrint(&file_path_buf, ".gila/todo/{s}/{s}.md", .{ task_id, task_id }) catch unreachable;
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
 
-    const content = try fs.readFile(file_path);
-    try testing.expect(std.mem.indexOf(u8, content, "title: Full task") != null);
-    try testing.expect(std.mem.indexOf(u8, content, "priority: high") != null);
-    try testing.expect(std.mem.indexOf(u8, content, "priority_value: 75") != null);
-    try testing.expect(std.mem.indexOf(u8, content, "feature") != null);
-    try testing.expect(std.mem.indexOf(u8, content, "backend") != null);
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 2), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+    {
+        const status_val = result_val.object.get("status") orelse return error.NoStatus;
+        try testing.expect(status_val == .string);
+        try testing.expectEqualStrings("todo", status_val.string);
+
+        const task_id_val = result_val.object.get("task_id") orelse return error.NoTaskId;
+        try std.testing.expect(task_id_val == .string);
+        try std.testing.expect(gila.id.isValid(task_id_val.string));
+
+        const task_id: []const u8 = task_id_val.string;
+        var dir_path_buf: [256]u8 = undefined;
+
+        const dir_path = std.fmt.bufPrint(&dir_path_buf, ".gila/todo/{s}", .{task_id}) catch unreachable;
+        try testing.expect(fs.dirExists(dir_path));
+
+        var file_path_buf: [256]u8 = undefined;
+        const file_path = std.fmt.bufPrint(&file_path_buf, ".gila/todo/{s}/{s}.md", .{ task_id, task_id }) catch unreachable;
+        try testing.expect(fs.fileExists(file_path));
+
+        const task = try readAndParseTask(fs, task_id, .todo);
+        try validateTask(&task);
+        try testing.expectEqual(gila.Status.todo, task.status);
+        try testing.expectEqualStrings("Full task", task.title);
+        try testing.expectEqual(gila.Priority.high, task.priority);
+        try testing.expectEqual(@as(u8, 75), task.priority_value);
+        try testing.expectEqualStrings("testuser", task.owner);
+        try testing.expectEqualStrings("Task description", task.description);
+        try testing.expect(task.tags != null);
+        try testing.expectEqual(2, task.tags.?.len);
+        try testing.expectEqualStrings("feature", task.tags.?[0]);
+        try testing.expectEqualStrings("backend", task.tags.?[1]);
+
+        const file_path_val = result_val.object.get("file_path") orelse return error.NoFilePath;
+        try testing.expect(file_path_val == .string);
+        var full_path_buf: [255]u8 = undefined;
+        const full_path = std.fmt.bufPrint(&full_path_buf, "/home/test/{s}", .{file_path}) catch unreachable;
+        try testing.expectEqualStrings(full_path, file_path_val.string);
+    }
 }
 
 test "task/create: with waiting_on sets status to waiting" {
@@ -380,16 +418,57 @@ test "task/create: with waiting_on sets status to waiting" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"status\":\"waiting\"");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
 
-    const task_id = try extractTaskIdFromResponse(testing.allocator, response);
-    var file_path_buf: [256]u8 = undefined;
-    const file_path = std.fmt.bufPrint(&file_path_buf, ".gila/waiting/{s}/{s}.md", .{ task_id, task_id }) catch unreachable;
-    try testing.expect(fs.fileExists(file_path));
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
 
-    const content = try fs.readFile(file_path);
-    try testing.expect(std.mem.indexOf(u8, content, "status: waiting") != null);
-    try testing.expect(std.mem.indexOf(u8, content, "test_task_abc") != null);
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 3), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+    {
+        const status_val = result_val.object.get("status") orelse return error.nostatus;
+        try testing.expect(status_val == .string);
+        try testing.expectEqualStrings("waiting", status_val.string);
+
+        const task_id_val = result_val.object.get("task_id") orelse return error.NoTaskId;
+        try std.testing.expect(task_id_val == .string);
+        try std.testing.expect(gila.id.isValid(task_id_val.string));
+
+        const task_id: []const u8 = task_id_val.string;
+        var dir_path_buf: [256]u8 = undefined;
+
+        const dir_path = std.fmt.bufPrint(&dir_path_buf, ".gila/todo/{s}", .{task_id}) catch unreachable;
+        try testing.expect(!fs.dirExists(dir_path));
+
+        var file_path_buf: [256]u8 = undefined;
+        const file_path = std.fmt.bufPrint(&file_path_buf, ".gila/waiting/{s}/{s}.md", .{ task_id, task_id }) catch unreachable;
+        try testing.expect(fs.fileExists(file_path));
+
+        const task = try readAndParseTask(fs, task_id, .waiting);
+        try validateTask(&task);
+        try testing.expectEqual(gila.Status.waiting, task.status);
+        try testing.expectEqualStrings("Waiting task", task.title);
+        try testing.expectEqual(gila.Priority.medium, task.priority);
+        try testing.expectEqual(@as(u8, 50), task.priority_value);
+        try testing.expectEqualStrings("testuser", task.owner);
+        try testing.expect(task.tags == null);
+        try testing.expect(task.waiting_on != null);
+        try testing.expectEqual(1, task.waiting_on.?.len);
+        try testing.expectEqualStrings("\"[[test_task_abc]]\"", task.waiting_on.?[0]);
+
+        const file_path_val = result_val.object.get("file_path") orelse return error.NoFilePath;
+        try testing.expect(file_path_val == .string);
+        var full_path_buf: [255]u8 = undefined;
+        const full_path = std.fmt.bufPrint(&full_path_buf, "/home/test/{s}", .{file_path}) catch unreachable;
+        try testing.expectEqualStrings(full_path, file_path_val.string);
+    }
 }
 
 test "task/create: missing title returns error" {
@@ -409,9 +488,29 @@ test "task/create: missing title returns error" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32602);
-    try expectResponseContains(response, "Missing required field: title");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 4), id_val.integer);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+    {
+        const code_val = error_val.object.get("code") orelse return error.NoCode;
+        try testing.expect(code_val == .integer);
+        try testing.expectEqual(@as(i64, -32602), code_val.integer);
+
+        const message_val = error_val.object.get("message") orelse return error.NoMessage;
+        try testing.expect(message_val == .string);
+        try testing.expect(std.mem.indexOf(u8, message_val.string, "Missing required field: title") != null);
+    }
 }
 
 test "task/create: empty title returns error" {
@@ -431,9 +530,29 @@ test "task/create: empty title returns error" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32602);
-    try expectResponseContains(response, "Title cannot be empty");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 5), id_val.integer);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+    {
+        const code_val = error_val.object.get("code") orelse return error.NoCode;
+        try testing.expect(code_val == .integer);
+        try testing.expectEqual(@as(i64, -32602), code_val.integer);
+
+        const message_val = error_val.object.get("message") orelse return error.NoMessage;
+        try testing.expect(message_val == .string);
+        try testing.expect(std.mem.indexOf(u8, message_val.string, "Title cannot be empty") != null);
+    }
 }
 
 test "task/create: invalid waiting_on task id returns error" {
@@ -453,8 +572,25 @@ test "task/create: invalid waiting_on task id returns error" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32002);
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 6), id_val.integer);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+    {
+        const code_val = error_val.object.get("code") orelse return error.NoCode;
+        try testing.expect(code_val == .integer);
+        try testing.expectEqual(@as(i64, -32002), code_val.integer);
+    }
 }
 
 test "task/create: with string id" {
@@ -474,8 +610,13 @@ test "task/create: with string id" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"result\":");
-    try expectResponseContains(response, "\"id\":\"string-id\"");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .string);
+    try testing.expectEqualStrings("string-id", id_val.string);
 }
 
 test "task/create: with null id" {
@@ -495,8 +636,12 @@ test "task/create: with null id" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"result\":");
-    try expectResponseContains(response, "\"id\":null");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .null);
 }
 
 test "task/get: existing task" {
@@ -517,12 +662,89 @@ test "task/get: existing task" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"result\":");
-    try expectResponseContains(response, "\"id\":\"test_task_xyz\"");
-    try expectResponseContains(response, "\"title\":\"My test task\"");
-    try expectResponseContains(response, "\"status\":\"todo\"");
-    try expectResponseContains(response, "\"priority\":\"medium\"");
-    try expectResponseContains(response, "\"file_path\":");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const req_id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(req_id_val == .integer);
+    try testing.expectEqual(@as(i64, 10), req_id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+    {
+        const id_val = result_val.object.get("task_id") orelse return error.NoTaskId;
+        try testing.expect(id_val == .string);
+        try testing.expectEqualStrings("test_task_xyz", id_val.string);
+
+        const title_val = result_val.object.get("title") orelse return error.NoTitle;
+        try testing.expect(title_val == .string);
+        try testing.expectEqualStrings("My test task", title_val.string);
+
+        const status_val = result_val.object.get("status") orelse return error.NoStatus;
+        try testing.expect(status_val == .string);
+        try testing.expectEqualStrings("todo", status_val.string);
+
+        const priority_val = result_val.object.get("priority") orelse return error.NoPriority;
+        try testing.expect(priority_val == .string);
+        try testing.expectEqualStrings("medium", priority_val.string);
+
+        const description_val = result_val.object.get("description") orelse return error.NoDescription;
+        try testing.expect(description_val == .string);
+        try testing.expectEqualStrings("Test task description", description_val.string);
+
+        const file_path_val = result_val.object.get("file_path") orelse return error.NoFilePath;
+        try testing.expect(file_path_val == .string);
+        var path_buf: [256]u8 = undefined;
+        const file_path = std.fmt.bufPrint(&path_buf, "/home/test/.gila/todo/{s}/{s}.md", .{ id_val.string, id_val.string }) catch unreachable;
+        try testing.expectEqualStrings(file_path, file_path_val.string);
+    }
+}
+
+test "task/get: path_only" {
+    const fs = try TestFs.setup(testing.allocator);
+    defer fs.deinit();
+
+    try initGilaProject(fs);
+    try createTaskFile(fs, "todo", "test_task_xyz", "My test task", "");
+
+    fs.setStdin(
+        \\{"jsonrpc":"2.0","method":"task/get","params":{"task_id":"test_task_xyz", "path_only":true},"id":10}
+        \\
+    );
+
+    var arena_buf: [512 * 1024]u8 = undefined;
+    var arena = stdx.Arena.initBuffer(&arena_buf);
+
+    runServer(fs, &arena);
+
+    const response = fs.getStdout();
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const req_id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(req_id_val == .integer);
+    try testing.expectEqual(@as(i64, 10), req_id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+    {
+        const file_path_val = result_val.object.get("file_path") orelse return error.NoFilePath;
+        try testing.expect(file_path_val == .string);
+        try testing.expect(std.mem.indexOf(u8, file_path_val.string, "test_task_xyz") != null);
+    }
+
+    try testing.expect(result_val.object.get("title") == null);
+    try testing.expect(result_val.object.get("status") == null);
 }
 
 test "task/get: task not found" {
@@ -542,9 +764,29 @@ test "task/get: task not found" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32001);
-    try expectResponseContains(response, "Task not found");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 11), id_val.integer);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+    {
+        const code_val = error_val.object.get("code") orelse return error.NoCode;
+        try testing.expect(code_val == .integer);
+        try testing.expectEqual(@as(i64, -32001), code_val.integer);
+
+        const message_val = error_val.object.get("message") orelse return error.NoMessage;
+        try testing.expect(message_val == .string);
+        try testing.expect(std.mem.indexOf(u8, message_val.string, "Task not found") != null);
+    }
 }
 
 test "task/get: invalid task id format" {
@@ -564,9 +806,29 @@ test "task/get: invalid task id format" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32002);
-    try expectResponseContains(response, "Invalid task ID format");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 12), id_val.integer);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+    {
+        const code_val = error_val.object.get("code") orelse return error.NoCode;
+        try testing.expect(code_val == .integer);
+        try testing.expectEqual(@as(i64, -32002), code_val.integer);
+
+        const message_val = error_val.object.get("message") orelse return error.NoMessage;
+        try testing.expect(message_val == .string);
+        try testing.expect(std.mem.indexOf(u8, message_val.string, "Invalid task ID format") != null);
+    }
 }
 
 test "task/get: missing task_id param" {
@@ -586,9 +848,29 @@ test "task/get: missing task_id param" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32602);
-    try expectResponseContains(response, "Missing required field: task_id");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 13), id_val.integer);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+    {
+        const code_val = error_val.object.get("code") orelse return error.NoCode;
+        try testing.expect(code_val == .integer);
+        try testing.expectEqual(@as(i64, -32602), code_val.integer);
+
+        const message_val = error_val.object.get("message") orelse return error.NoMessage;
+        try testing.expect(message_val == .string);
+        try testing.expect(std.mem.indexOf(u8, message_val.string, "Missing required field: task_id") != null);
+    }
 }
 
 test "task/update: update title" {
@@ -609,12 +891,38 @@ test "task/update: update title" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"result\":");
-    try expectResponseContains(response, "\"task_id\":\"update_task_aaa\"");
-    try expectResponseContains(response, "\"status\":\"todo\"");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
 
-    const content = try fs.readFile(".gila/todo/update_task_aaa/update_task_aaa.md");
-    try testing.expect(std.mem.indexOf(u8, content, "title: Updated title") != null);
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 20), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+    {
+        const task_id_val = result_val.object.get("task_id") orelse return error.NoTaskId;
+        try testing.expect(task_id_val == .string);
+        try testing.expectEqualStrings("update_task_aaa", task_id_val.string);
+
+        var file_path_buf: [256]u8 = undefined;
+        const file_path = std.fmt.bufPrint(&file_path_buf, ".gila/todo/{s}/{s}.md", .{ task_id_val.string, task_id_val.string }) catch unreachable;
+        try testing.expect(fs.fileExists(file_path));
+
+        const task = try readAndParseTask(fs, task_id_val.string, .todo);
+        try validateTask(&task);
+        try testing.expectEqual(gila.Status.todo, task.status);
+        try testing.expectEqualStrings("Updated title", task.title);
+
+        const status_val = result_val.object.get("status") orelse return error.NoStatus;
+        try testing.expect(status_val == .string);
+        try testing.expectEqualStrings("todo", status_val.string);
+    }
 }
 
 test "task/update: update status todo to started" {
@@ -635,11 +943,38 @@ test "task/update: update status todo to started" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"status\":\"started\"");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
 
-    try testing.expect(!fs.dirExists(".gila/todo/status_task_bbb"));
-    try testing.expect(fs.dirExists(".gila/started/status_task_bbb"));
-    try testing.expect(fs.fileExists(".gila/started/status_task_bbb/status_task_bbb.md"));
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 21), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+    {
+        try testing.expect(!fs.dirExists(".gila/todo/status_task_bbb"));
+        try testing.expect(fs.dirExists(".gila/started/status_task_bbb"));
+        try testing.expect(fs.fileExists(".gila/started/status_task_bbb/status_task_bbb.md"));
+
+        const task = try readAndParseTask(fs, "status_task_bbb", .started);
+        try validateTask(&task);
+
+        try testing.expectEqual(gila.Status.started, task.status);
+        try testing.expectEqual(gila.Priority.medium, task.priority);
+        try testing.expectEqual(@as(u8, 50), task.priority_value);
+        try testing.expectEqualStrings("testuser", task.owner);
+        try testing.expectEqualStrings("Task to start", task.title);
+
+        const status_val = result_val.object.get("status") orelse return error.NoStatus;
+        try testing.expect(status_val == .string);
+        try testing.expectEqualStrings("started", status_val.string);
+    }
 }
 
 test "task/update: update status started to done" {
@@ -660,12 +995,32 @@ test "task/update: update status started to done" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"status\":\"done\"");
-    try expectResponseContains(response, "\"completed\":");
-    try expectResponseNotContains(response, "\"completed\":null");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
 
-    try testing.expect(!fs.dirExists(".gila/started/done_task_ccc"));
-    try testing.expect(fs.dirExists(".gila/done/done_task_ccc"));
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 22), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+    {
+        try testing.expect(!fs.dirExists(".gila/started/done_task_ccc"));
+        try testing.expect(fs.dirExists(".gila/done/done_task_ccc"));
+
+        const status_val = result_val.object.get("status") orelse return error.NoStatus;
+        try testing.expect(status_val == .string);
+        try testing.expectEqualStrings("done", status_val.string);
+
+        const completed_val = result_val.object.get("completed") orelse return error.NoCompleted;
+        try testing.expect(completed_val == .string);
+        _ = try stdx.DateTimeUTC.fromString(completed_val.string, .@"YYYY-MM-DDTHH:MM:SSZ");
+    }
 }
 
 test "task/update: update priority" {
@@ -686,11 +1041,38 @@ test "task/update: update priority" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"result\":");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
 
-    const content = try fs.readFile(".gila/todo/priority_task_eee/priority_task_eee.md");
-    try testing.expect(std.mem.indexOf(u8, content, "priority: urgent") != null);
-    try testing.expect(std.mem.indexOf(u8, content, "priority_value: 100") != null);
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 23), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+    {
+        const task_id_val = result_val.object.get("task_id") orelse return error.NoTaskId;
+        try testing.expect(task_id_val == .string);
+        try testing.expectEqualStrings("priority_task_eee", task_id_val.string);
+
+        const status_val = result_val.object.get("status") orelse return error.NoStatus;
+        try testing.expect(status_val == .string);
+        try testing.expectEqualStrings("todo", status_val.string);
+
+        const task = try readAndParseTask(fs, "priority_task_eee", .todo);
+        try validateTask(&task);
+
+        try testing.expectEqual(gila.Status.todo, task.status);
+        try testing.expectEqual(gila.Priority.urgent, task.priority);
+        try testing.expectEqual(@as(u8, 100), task.priority_value);
+        try testing.expectEqualStrings("testuser", task.owner);
+        try testing.expectEqualStrings("Priority task", task.title);
+    }
 }
 
 test "task/update: task not found" {
@@ -710,8 +1092,25 @@ test "task/update: task not found" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32001);
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 24), id_val.integer);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+    {
+        const code_val = error_val.object.get("code") orelse return error.NoCode;
+        try testing.expect(code_val == .integer);
+        try testing.expectEqual(@as(i64, -32001), code_val.integer);
+    }
 }
 
 test "task/update: invalid task id" {
@@ -731,8 +1130,24 @@ test "task/update: invalid task id" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32002);
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 25), id_val.integer);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+
+    const code_val = error_val.object.get("code") orelse return error.NoCode;
+    try testing.expect(code_val == .integer);
+    try testing.expectEqual(@as(i64, -32002), code_val.integer);
 }
 
 test "task/update: update tags" {
@@ -753,11 +1168,30 @@ test "task/update: update tags" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"result\":");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
 
-    const content = try fs.readFile(".gila/todo/tags_task_ddd/tags_task_ddd.md");
-    try testing.expect(std.mem.indexOf(u8, content, "new-tag") != null);
-    try testing.expect(std.mem.indexOf(u8, content, "another") != null);
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 26), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+    {
+        const task = try readAndParseTask(fs, "tags_task_ddd", .todo);
+        try validateTask(&task);
+
+        try testing.expectEqual(gila.Status.todo, task.status);
+        try testing.expect(task.tags != null);
+        try testing.expectEqual(2, task.tags.?.len);
+        try testing.expectEqualStrings("new-tag", task.tags.?[0]);
+        try testing.expectEqualStrings("another", task.tags.?[1]);
+    }
 }
 
 test "shutdown: returns success message" {
@@ -777,9 +1211,24 @@ test "shutdown: returns success message" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"result\":");
-    try expectResponseContains(response, "\"message\":\"Server shutting down\"");
-    try expectResponseContains(response, "\"id\":30");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 30), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const message_val = result_val.object.get("message") orelse return error.NoMessage;
+    try testing.expect(message_val == .string);
+    try testing.expectEqualStrings("Server shutting down", message_val.string);
 }
 
 test "error: invalid JSON" {
@@ -796,9 +1245,27 @@ test "error: invalid JSON" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32700);
-    try expectResponseContains(response, "Parse error");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .null);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+
+    const code_val = error_val.object.get("code") orelse return error.NoCode;
+    try testing.expect(code_val == .integer);
+    try testing.expectEqual(@as(i64, -32700), code_val.integer);
+
+    const message_val = error_val.object.get("message") orelse return error.NoMessage;
+    try testing.expect(message_val == .string);
+    try testing.expect(std.mem.indexOf(u8, message_val.string, "Parse error") != null);
 }
 
 test "error: request not an object" {
@@ -815,9 +1282,27 @@ test "error: request not an object" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32600);
-    try expectResponseContains(response, "Request must be a JSON object");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .null);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+
+    const code_val = error_val.object.get("code") orelse return error.NoCode;
+    try testing.expect(code_val == .integer);
+    try testing.expectEqual(@as(i64, -32600), code_val.integer);
+
+    const message_val = error_val.object.get("message") orelse return error.NoMessage;
+    try testing.expect(message_val == .string);
+    try testing.expect(std.mem.indexOf(u8, message_val.string, "Request must be a JSON object") != null);
 }
 
 test "error: missing jsonrpc field" {
@@ -837,9 +1322,27 @@ test "error: missing jsonrpc field" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32600);
-    try expectResponseContains(response, "Missing 'jsonrpc' field");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .null);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+
+    const code_val = error_val.object.get("code") orelse return error.NoCode;
+    try testing.expect(code_val == .integer);
+    try testing.expectEqual(@as(i64, -32600), code_val.integer);
+
+    const message_val = error_val.object.get("message") orelse return error.NoMessage;
+    try testing.expect(message_val == .string);
+    try testing.expect(std.mem.indexOf(u8, message_val.string, "Missing 'jsonrpc' field") != null);
 }
 
 test "error: invalid jsonrpc version" {
@@ -859,9 +1362,27 @@ test "error: invalid jsonrpc version" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32600);
-    try expectResponseContains(response, "Invalid jsonrpc version");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .null);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+
+    const code_val = error_val.object.get("code") orelse return error.NoCode;
+    try testing.expect(code_val == .integer);
+    try testing.expectEqual(@as(i64, -32600), code_val.integer);
+
+    const message_val = error_val.object.get("message") orelse return error.NoMessage;
+    try testing.expect(message_val == .string);
+    try testing.expect(std.mem.indexOf(u8, message_val.string, "Invalid jsonrpc version") != null);
 }
 
 test "error: missing id field" {
@@ -881,9 +1402,27 @@ test "error: missing id field" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32600);
-    try expectResponseContains(response, "Missing 'id' field");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .null);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+
+    const code_val = error_val.object.get("code") orelse return error.NoCode;
+    try testing.expect(code_val == .integer);
+    try testing.expectEqual(@as(i64, -32600), code_val.integer);
+
+    const message_val = error_val.object.get("message") orelse return error.NoMessage;
+    try testing.expect(message_val == .string);
+    try testing.expect(std.mem.indexOf(u8, message_val.string, "Missing 'id' field") != null);
 }
 
 test "error: invalid id type" {
@@ -903,9 +1442,27 @@ test "error: invalid id type" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32600);
-    try expectResponseContains(response, "Invalid 'id' field type");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .null);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+
+    const code_val = error_val.object.get("code") orelse return error.NoCode;
+    try testing.expect(code_val == .integer);
+    try testing.expectEqual(@as(i64, -32600), code_val.integer);
+
+    const message_val = error_val.object.get("message") orelse return error.NoMessage;
+    try testing.expect(message_val == .string);
+    try testing.expect(std.mem.indexOf(u8, message_val.string, "Invalid 'id' field type") != null);
 }
 
 test "error: missing method field" {
@@ -925,9 +1482,28 @@ test "error: missing method field" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32600);
-    try expectResponseContains(response, "Missing 'method' field");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 1), id_val.integer);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+
+    const code_val = error_val.object.get("code") orelse return error.NoCode;
+    try testing.expect(code_val == .integer);
+    try testing.expectEqual(@as(i64, -32600), code_val.integer);
+
+    const message_val = error_val.object.get("message") orelse return error.NoMessage;
+    try testing.expect(message_val == .string);
+    try testing.expect(std.mem.indexOf(u8, message_val.string, "Missing 'method' field") != null);
 }
 
 test "error: method not a string" {
@@ -947,9 +1523,28 @@ test "error: method not a string" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32600);
-    try expectResponseContains(response, "'method' must be a string");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 1), id_val.integer);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+
+    const code_val = error_val.object.get("code") orelse return error.NoCode;
+    try testing.expect(code_val == .integer);
+    try testing.expectEqual(@as(i64, -32600), code_val.integer);
+
+    const message_val = error_val.object.get("message") orelse return error.NoMessage;
+    try testing.expect(message_val == .string);
+    try testing.expect(std.mem.indexOf(u8, message_val.string, "'method' must be a string") != null);
 }
 
 test "error: unknown method" {
@@ -969,9 +1564,28 @@ test "error: unknown method" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32600);
-    try expectResponseContains(response, "Invalid method");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 1), id_val.integer);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+
+    const code_val = error_val.object.get("code") orelse return error.NoCode;
+    try testing.expect(code_val == .integer);
+    try testing.expectEqual(@as(i64, -32600), code_val.integer);
+
+    const message_val = error_val.object.get("message") orelse return error.NoMessage;
+    try testing.expect(message_val == .string);
+    try testing.expect(std.mem.indexOf(u8, message_val.string, "Invalid method") != null);
 }
 
 test "error: params not an object" {
@@ -991,9 +1605,28 @@ test "error: params not an object" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32602);
-    try expectResponseContains(response, "Params must be an object");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 1), id_val.integer);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+
+    const code_val = error_val.object.get("code") orelse return error.NoCode;
+    try testing.expect(code_val == .integer);
+    try testing.expectEqual(@as(i64, -32602), code_val.integer);
+
+    const message_val = error_val.object.get("message") orelse return error.NoMessage;
+    try testing.expect(message_val == .string);
+    try testing.expect(std.mem.indexOf(u8, message_val.string, "Params must be an object") != null);
 }
 
 test "error: missing params for task/create" {
@@ -1013,9 +1646,28 @@ test "error: missing params for task/create" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32602);
-    try expectResponseContains(response, "Missing params");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 1), id_val.integer);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+
+    const code_val = error_val.object.get("code") orelse return error.NoCode;
+    try testing.expect(code_val == .integer);
+    try testing.expectEqual(@as(i64, -32602), code_val.integer);
+
+    const message_val = error_val.object.get("message") orelse return error.NoMessage;
+    try testing.expect(message_val == .string);
+    try testing.expect(std.mem.indexOf(u8, message_val.string, "Missing params") != null);
 }
 
 test "error: no gila directory" {
@@ -1033,9 +1685,27 @@ test "error: no gila directory" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"error\":");
-    try expectErrorCode(response, -32005);
-    try expectResponseContains(response, "GILA directory not found");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .null);
+
+    const error_val = root_value.object.get("error") orelse return error.NoError;
+    try testing.expect(error_val == .object);
+
+    const code_val = error_val.object.get("code") orelse return error.NoCode;
+    try testing.expect(code_val == .integer);
+    try testing.expectEqual(@as(i64, -32005), code_val.integer);
+
+    const message_val = error_val.object.get("message") orelse return error.NoMessage;
+    try testing.expect(message_val == .string);
+    try testing.expect(std.mem.indexOf(u8, message_val.string, "GILA directory not found") != null);
 }
 
 test "workflow: create then get task" {
@@ -1055,7 +1725,14 @@ test "workflow: create then get task" {
     runServer(fs, &arena);
 
     const create_response = fs.getStdout();
-    try expectResponseContains(create_response, "\"result\":");
+    {
+        const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, create_response, .{});
+        const root_value = parsed.value;
+        try testing.expect(root_value == .object);
+
+        const result_val = root_value.object.get("result") orelse return error.NoResult;
+        try testing.expect(result_val == .object);
+    }
 
     const task_id = try extractTaskIdFromResponse(testing.allocator, create_response);
 
@@ -1065,17 +1742,39 @@ test "workflow: create then get task" {
     var get_request_buf: [256]u8 = undefined;
     const get_request = std.fmt.bufPrint(&get_request_buf,
         \\{{"jsonrpc":"2.0","method":"task/get","params":{{"task_id":"{s}"}},"id":101}}
-        \\ 
+        \\
     , .{task_id}) catch unreachable;
 
     fs.setStdin(get_request);
     runServer(fs, &arena);
 
     const get_response = fs.getStdout();
-    try expectResponseContains(get_response, "\"result\":");
-    try expectResponseContains(get_response, "\"title\":\"Workflow task\"");
-    try expectResponseContains(get_response, "\"description\":\"My description\"");
-    try expectResponseContains(get_response, "\"status\":\"todo\"");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, get_response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 101), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const title_val = result_val.object.get("title") orelse return error.NoTitle;
+    try testing.expect(title_val == .string);
+    try testing.expectEqualStrings("Workflow task", title_val.string);
+
+    const desc_val = result_val.object.get("description") orelse return error.NoDescription;
+    try testing.expect(desc_val == .string);
+    try testing.expectEqualStrings("My description", desc_val.string);
+
+    const status_val = result_val.object.get("status") orelse return error.NoStatus;
+    try testing.expect(status_val == .string);
+    try testing.expectEqualStrings("todo", status_val.string);
 }
 
 test "workflow: create then update title" {
@@ -1103,20 +1802,24 @@ test "workflow: create then update title" {
     var update_request_buf: [256]u8 = undefined;
     const update_request = std.fmt.bufPrint(&update_request_buf,
         \\{{"jsonrpc":"2.0","method":"task/update","params":{{"task_id":"{s}","title":"Renamed task"}},"id":111}}
-        \\ 
+        \\
     , .{task_id}) catch unreachable;
 
     fs.setStdin(update_request);
     runServer(fs, &arena);
 
     const update_response = fs.getStdout();
-    try expectResponseContains(update_response, "\"result\":");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, update_response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
 
-    var file_path_buf: [256]u8 = undefined;
-    const file_path = std.fmt.bufPrint(&file_path_buf, ".gila/todo/{s}/{s}.md", .{ task_id, task_id }) catch unreachable;
-    const content = try fs.readFile(file_path);
-    try testing.expect(std.mem.indexOf(u8, content, "title: Renamed task") != null);
-    try testing.expect(std.mem.indexOf(u8, content, "Original name") == null);
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const task = try readAndParseTask(fs, task_id, .todo);
+    try validateTask(&task);
+    try testing.expectEqual(gila.Status.todo, task.status);
+    try testing.expectEqualStrings("Renamed task", task.title);
 }
 
 test "workflow: full lifecycle todo->started->done" {
@@ -1154,7 +1857,19 @@ test "workflow: full lifecycle todo->started->done" {
     fs.setStdin(start_request);
     runServer(fs, &arena);
 
-    try expectResponseContains(fs.getStdout(), "\"status\":\"started\"");
+    {
+        const start_response = fs.getStdout();
+        const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, start_response, .{});
+        const root_value = parsed.value;
+        try testing.expect(root_value == .object);
+
+        const result_val = root_value.object.get("result") orelse return error.NoResult;
+        try testing.expect(result_val == .object);
+
+        const status_val = result_val.object.get("status") orelse return error.NoStatus;
+        try testing.expect(status_val == .string);
+        try testing.expectEqualStrings("started", status_val.string);
+    }
     try testing.expect(!fs.dirExists(todo_path));
 
     var started_path_buf: [256]u8 = undefined;
@@ -1167,16 +1882,28 @@ test "workflow: full lifecycle todo->started->done" {
     var done_request_buf: [256]u8 = undefined;
     const done_request = std.fmt.bufPrint(&done_request_buf,
         \\{{"jsonrpc":"2.0","method":"task/update","params":{{"task_id":"{s}","status":"done"}},"id":122}}
-        \\ 
+        \\
     , .{task_id}) catch unreachable;
 
     fs.setStdin(done_request);
     runServer(fs, &arena);
 
     const done_response = fs.getStdout();
-    try expectResponseContains(done_response, "\"status\":\"done\"");
-    try expectResponseContains(done_response, "\"completed\":");
-    try expectResponseNotContains(done_response, "\"completed\":null");
+    {
+        const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, done_response, .{});
+        const root_value = parsed.value;
+        try testing.expect(root_value == .object);
+
+        const result_val = root_value.object.get("result") orelse return error.NoResult;
+        try testing.expect(result_val == .object);
+
+        const status_val = result_val.object.get("status") orelse return error.NoStatus;
+        try testing.expect(status_val == .string);
+        try testing.expectEqualStrings("done", status_val.string);
+
+        const completed_val = result_val.object.get("completed") orelse return error.NoCompleted;
+        try testing.expect(completed_val == .string);
+    }
 
     try testing.expect(!fs.dirExists(started_path));
 
@@ -1223,8 +1950,19 @@ test "workflow: create task cancelled" {
     runServer(fs, &arena);
 
     const cancel_response = fs.getStdout();
-    try expectResponseContains(cancel_response, "\"status\":\"cancelled\"");
-    try expectResponseContains(cancel_response, "\"completed\":");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, cancel_response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const status_val = result_val.object.get("status") orelse return error.NoStatus;
+    try testing.expect(status_val == .string);
+    try testing.expectEqualStrings("cancelled", status_val.string);
+
+    const completed_val = result_val.object.get("completed") orelse return error.NoCompleted;
+    try testing.expect(completed_val == .string);
 
     var cancelled_path_buf: [256]u8 = undefined;
     const cancelled_path = std.fmt.bufPrint(&cancelled_path_buf, ".gila/cancelled/{s}", .{task_id}) catch unreachable;
@@ -1308,11 +2046,33 @@ test "task/find: filter by priority" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"result\":");
-    try expectResponseContains(response, "\"tasks\":");
-    try expectResponseContains(response, "high_pri_abc");
-    try expectResponseNotContains(response, "low_pri_abc");
-    try expectResponseContains(response, "\"count\":1");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 200), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const count_val = result_val.object.get("count") orelse return error.NoCount;
+    try testing.expect(count_val == .integer);
+    try testing.expectEqual(@as(i64, 1), count_val.integer);
+
+    const tasks_val = result_val.object.get("tasks") orelse return error.NoTasks;
+    try testing.expect(tasks_val == .array);
+    try testing.expectEqual(1, tasks_val.array.items.len);
+    const task = tasks_val.array.items[0];
+    try testing.expect(task == .object);
+    const task_id = task.object.get("task_id") orelse return error.NoTaskId;
+    try testing.expect(task_id == .string);
+    try testing.expectEqualStrings("high_pri_abc", task_id.string);
 }
 
 test "task/find: filter by status" {
@@ -1334,8 +2094,30 @@ test "task/find: filter by status" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "started_tsk_xyz");
-    try expectResponseNotContains(response, "todo_task_abc");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    defer parsed.deinit();
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 201), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const tasks_val = result_val.object.get("tasks") orelse return error.NoTasks;
+    try testing.expect(tasks_val == .array);
+    try testing.expectEqual(1, tasks_val.array.items.len);
+    const task = tasks_val.array.items[0];
+    try testing.expect(task == .object);
+    const task_id = task.object.get("task_id") orelse return error.NoTaskId;
+    try testing.expect(task_id == .string);
+    try testing.expectEqualStrings("started_tsk_xyz", task_id.string);
 }
 
 test "task/find: filter by tags with or" {
@@ -1400,9 +2182,42 @@ test "task/find: filter by tags with or" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "feature_tsk_abc");
-    try expectResponseContains(response, "bugfix_tsk_abc");
-    try expectResponseNotContains(response, "other_tsk_abc");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    defer parsed.deinit();
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 202), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const tasks_val = result_val.object.get("tasks") orelse return error.NoTasks;
+    try testing.expect(tasks_val == .array);
+
+    // Verify feature_tsk_abc and bugfix_tsk_abc are in results, other_tsk_abc is not
+    var found_feature = false;
+    var found_bugfix = false;
+    for (tasks_val.array.items) |task| {
+        try testing.expect(task == .object);
+        const task_id = task.object.get("task_id") orelse continue;
+        try testing.expect(task_id == .string);
+        if (std.mem.eql(u8, task_id.string, "feature_tsk_abc")) {
+            found_feature = true;
+        }
+        if (std.mem.eql(u8, task_id.string, "bugfix_tsk_abc")) {
+            found_bugfix = true;
+        }
+        try testing.expect(!std.mem.eql(u8, task_id.string, "other_tsk_abc"));
+    }
+    try testing.expect(found_feature);
+    try testing.expect(found_bugfix);
 }
 
 test "task/find: filter by tags with and" {
@@ -1453,8 +2268,30 @@ test "task/find: filter by tags with and" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "both_tags_abc");
-    try expectResponseNotContains(response, "one_tag_abc");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    defer parsed.deinit();
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 203), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const tasks_val = result_val.object.get("tasks") orelse return error.NoTasks;
+    try testing.expect(tasks_val == .array);
+    try testing.expectEqual(1, tasks_val.array.items.len);
+    const task = tasks_val.array.items[0];
+    try testing.expect(task == .object);
+    const task_id = task.object.get("task_id") orelse return error.NoTaskId;
+    try testing.expect(task_id == .string);
+    try testing.expectEqualStrings("both_tags_abc", task_id.string);
 }
 
 test "task/find: empty results" {
@@ -1475,8 +2312,29 @@ test "task/find: empty results" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"tasks\":[]");
-    try expectResponseContains(response, "\"count\":0");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    defer parsed.deinit();
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 204), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const tasks_val = result_val.object.get("tasks") orelse return error.NoTasks;
+    try testing.expect(tasks_val == .array);
+    try testing.expectEqual(@as(usize, 0), tasks_val.array.items.len);
+
+    const count_val = result_val.object.get("count") orelse return error.NoCount;
+    try testing.expect(count_val == .integer);
+    try testing.expectEqual(@as(i64, 0), count_val.integer);
 }
 
 test "task/find: custom fields" {
@@ -1497,12 +2355,46 @@ test "task/find: custom fields" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"id\":\"fields_tsk_abc\"");
-    try expectResponseContains(response, "\"title\":\"Fields Test\"");
-    try expectResponseContains(response, "\"priority\":\"high\"");
-    try expectResponseContains(response, "\"file_path\":");
-    try expectResponseNotContains(response, "\"status\":");
-    try expectResponseNotContains(response, "\"owner\":");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    defer parsed.deinit();
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 205), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const tasks_val = result_val.object.get("tasks") orelse return error.NoTasks;
+    try testing.expect(tasks_val == .array);
+    try testing.expectEqual(@as(usize, 1), tasks_val.array.items.len);
+
+    const task = tasks_val.array.items[0];
+    try testing.expect(task == .object);
+
+    const task_id = task.object.get("task_id") orelse return error.NoTaskId;
+    try testing.expect(task_id == .string);
+    try testing.expectEqualStrings("fields_tsk_abc", task_id.string);
+
+    const title_val = task.object.get("title") orelse return error.NoTitle;
+    try testing.expect(title_val == .string);
+    try testing.expectEqualStrings("Fields Test", title_val.string);
+
+    const priority_val = task.object.get("priority") orelse return error.NoPriority;
+    try testing.expect(priority_val == .string);
+    try testing.expectEqualStrings("high", priority_val.string);
+
+    const file_path_val = task.object.get("file_path");
+    try testing.expect(file_path_val != null);
+
+    try testing.expect(task.object.get("status") == null);
+    try testing.expect(task.object.get("owner") == null);
 }
 
 test "task/find: default fields only id status title" {
@@ -1523,11 +2415,43 @@ test "task/find: default fields only id status title" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"id\":\"default_fl_abc\"");
-    try expectResponseContains(response, "\"status\":\"todo\"");
-    try expectResponseContains(response, "\"title\":\"Default Fields\"");
-    try expectResponseNotContains(response, "\"priority\":");
-    try expectResponseNotContains(response, "\"file_path\":");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    defer parsed.deinit();
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 206), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const tasks_val = result_val.object.get("tasks") orelse return error.NoTasks;
+    try testing.expect(tasks_val == .array);
+    try testing.expectEqual(@as(usize, 1), tasks_val.array.items.len);
+
+    const task = tasks_val.array.items[0];
+    try testing.expect(task == .object);
+
+    const task_id = task.object.get("task_id") orelse return error.NoTaskId;
+    try testing.expect(task_id == .string);
+    try testing.expectEqualStrings("default_fl_abc", task_id.string);
+
+    const status_val = task.object.get("status") orelse return error.NoStatus;
+    try testing.expect(status_val == .string);
+    try testing.expectEqualStrings("todo", status_val.string);
+
+    const title_val = task.object.get("title") orelse return error.NoTitle;
+    try testing.expect(title_val == .string);
+    try testing.expectEqualStrings("Default Fields", title_val.string);
+
+    try testing.expect(task.object.get("priority") == null);
+    try testing.expect(task.object.get("file_path") == null);
 }
 
 test "task/find: list all tasks" {
@@ -1550,10 +2474,36 @@ test "task/find: list all tasks" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"tasks\":");
-    try expectResponseContains(response, "\"count\":3");
-    try expectResponseContains(response, "\"limit\":18446744073709551615");
-    try expectResponseContains(response, "\"offset\":0");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    defer parsed.deinit();
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 300), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const tasks_val = result_val.object.get("tasks") orelse return error.NoTasks;
+    try testing.expect(tasks_val == .array);
+
+    const count_val = result_val.object.get("count") orelse return error.NoCount;
+    try testing.expect(count_val == .integer);
+    try testing.expectEqual(@as(i64, 3), count_val.integer);
+
+    const limit_val = result_val.object.get("limit") orelse return error.NoLimit;
+    try testing.expect(limit_val == .integer);
+    try testing.expectEqual(std.math.maxInt(i64), limit_val.integer);
+
+    const offset_val = result_val.object.get("offset") orelse return error.NoOffset;
+    try testing.expect(offset_val == .integer);
+    try testing.expectEqual(@as(i64, 0), offset_val.integer);
 }
 
 test "task/find: pagination with limit" {
@@ -1576,9 +2526,33 @@ test "task/find: pagination with limit" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"available\":3");
-    try expectResponseContains(response, "\"count\":2");
-    try expectResponseContains(response, "\"limit\":2");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    defer parsed.deinit();
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 302), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const available_val = result_val.object.get("available") orelse return error.NoAvailable;
+    try testing.expect(available_val == .integer);
+    try testing.expectEqual(@as(i64, 3), available_val.integer);
+
+    const count_val = result_val.object.get("count") orelse return error.NoCount;
+    try testing.expect(count_val == .integer);
+    try testing.expectEqual(@as(i64, 2), count_val.integer);
+
+    const limit_val = result_val.object.get("limit") orelse return error.NoLimit;
+    try testing.expect(limit_val == .integer);
+    try testing.expectEqual(@as(i64, 2), limit_val.integer);
 }
 
 test "task/find: pagination with offset" {
@@ -1601,10 +2575,37 @@ test "task/find: pagination with offset" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"available\":3");
-    try expectResponseContains(response, "\"count\":2");
-    try expectResponseContains(response, "\"offset\":1");
-    try expectResponseContains(response, "\"limit\":2");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    defer parsed.deinit();
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 303), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const available_val = result_val.object.get("available") orelse return error.NoAvailable;
+    try testing.expect(available_val == .integer);
+    try testing.expectEqual(@as(i64, 3), available_val.integer);
+
+    const count_val = result_val.object.get("count") orelse return error.NoCount;
+    try testing.expect(count_val == .integer);
+    try testing.expectEqual(@as(i64, 2), count_val.integer);
+
+    const offset_val = result_val.object.get("offset") orelse return error.NoOffset;
+    try testing.expect(offset_val == .integer);
+    try testing.expectEqual(@as(i64, 1), offset_val.integer);
+
+    const limit_val = result_val.object.get("limit") orelse return error.NoLimit;
+    try testing.expect(limit_val == .integer);
+    try testing.expectEqual(@as(i64, 2), limit_val.integer);
 }
 
 test "task/find: empty list" {
@@ -1624,9 +2625,33 @@ test "task/find: empty list" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"tasks\":[]");
-    try expectResponseContains(response, "\"available\":0");
-    try expectResponseContains(response, "\"count\":0");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    defer parsed.deinit();
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 304), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const tasks_val = result_val.object.get("tasks") orelse return error.NoTasks;
+    try testing.expect(tasks_val == .array);
+    try testing.expectEqual(@as(usize, 0), tasks_val.array.items.len);
+
+    const available_val = result_val.object.get("available") orelse return error.NoAvailable;
+    try testing.expect(available_val == .integer);
+    try testing.expectEqual(@as(i64, 0), available_val.integer);
+
+    const count_val = result_val.object.get("count") orelse return error.NoCount;
+    try testing.expect(count_val == .integer);
+    try testing.expectEqual(@as(i64, 0), count_val.integer);
 }
 
 test "task/sync: no changes needed" {
@@ -1647,9 +2672,33 @@ test "task/sync: no changes needed" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"transitions\":[]");
-    try expectResponseContains(response, "\"updates\":[]");
-    try expectResponseContains(response, "\"count\":0");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    defer parsed.deinit();
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 400), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const transitions_val = result_val.object.get("transitions") orelse return error.NoTransitions;
+    try testing.expect(transitions_val == .array);
+    try testing.expectEqual(@as(usize, 0), transitions_val.array.items.len);
+
+    const updates_val = result_val.object.get("updates") orelse return error.NoUpdates;
+    try testing.expect(updates_val == .array);
+    try testing.expectEqual(@as(usize, 0), updates_val.array.items.len);
+
+    const count_val = result_val.object.get("count") orelse return error.NoCount;
+    try testing.expect(count_val == .integer);
+    try testing.expectEqual(@as(i64, 0), count_val.integer);
 }
 
 test "task/sync: moves misplaced task" {
@@ -1682,10 +2731,36 @@ test "task/sync: moves misplaced task" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"transitions\":");
-    try expectResponseContains(response, "misplace_task_abc");
-    try expectResponseContains(response, "\"from\":\"todo\"");
-    try expectResponseContains(response, "\"to\":\"started\"");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    defer parsed.deinit();
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 401), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const transitions_val = result_val.object.get("transitions") orelse return error.NoTransitions;
+    try testing.expect(transitions_val == .array);
+    try testing.expectEqual(1, transitions_val.array.items.len);
+    const transition = transitions_val.array.items[0];
+    try testing.expect(transition == .object);
+    const task_id = transition.object.get("task_id") orelse return error.NoTaskId;
+    try testing.expect(task_id == .string);
+    try testing.expectEqualStrings("misplace_task_abc", task_id.string);
+    const from_val = transition.object.get("from") orelse return error.NoFrom;
+    try testing.expect(from_val == .string);
+    try testing.expectEqualStrings("todo", from_val.string);
+    const to_val = transition.object.get("to") orelse return error.NoTo;
+    try testing.expect(to_val == .string);
+    try testing.expectEqualStrings("started", to_val.string);
 
     try testing.expect(!fs.dirExists(".gila/todo/misplace_task_abc"));
     try testing.expect(fs.dirExists(".gila/started/misplace_task_abc"));
@@ -1737,10 +2812,36 @@ test "task/sync: removes completed dependency" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"updates\":");
-    try expectResponseContains(response, "waiting_tsk_xyz");
-    try expectResponseContains(response, "removed_completed_dependency");
-    try expectResponseContains(response, "done_dep_abc");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    defer parsed.deinit();
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 402), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const updates_val = result_val.object.get("updates") orelse return error.NoUpdates;
+    try testing.expect(updates_val == .array);
+    try testing.expectEqual(1, updates_val.array.items.len);
+    const update = updates_val.array.items[0];
+    try testing.expect(update == .object);
+    const task_id = update.object.get("task_id") orelse return error.NoTaskId;
+    try testing.expect(task_id == .string);
+    try testing.expectEqualStrings("waiting_tsk_xyz", task_id.string);
+    const change = update.object.get("change") orelse return error.NoChange;
+    try testing.expect(change == .string);
+    try testing.expectEqualStrings("removed_completed_dependency", change.string);
+    const dependency = update.object.get("dependency") orelse return error.NoDependency;
+    try testing.expect(dependency == .string);
+    try testing.expectEqualStrings("done_dep_abc", dependency.string);
 }
 
 test "task/sync: transitions waiting to todo when no dependencies" {
@@ -1789,10 +2890,36 @@ test "task/sync: transitions waiting to todo when no dependencies" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "\"transitions\":");
-    try expectResponseContains(response, "wait_trans_xyz");
-    try expectResponseContains(response, "\"from\":\"waiting\"");
-    try expectResponseContains(response, "\"to\":\"todo\"");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    defer parsed.deinit();
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 403), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const transitions_val = result_val.object.get("transitions") orelse return error.NoTransitions;
+    try testing.expect(transitions_val == .array);
+    try testing.expectEqual(1, transitions_val.array.items.len);
+    const transition = transitions_val.array.items[0];
+    try testing.expect(transition == .object);
+    const task_id = transition.object.get("task_id") orelse return error.NoTaskId;
+    try testing.expect(task_id == .string);
+    try testing.expectEqualStrings("wait_trans_xyz", task_id.string);
+    const from_val = transition.object.get("from") orelse return error.NoFrom;
+    try testing.expect(from_val == .string);
+    try testing.expectEqualStrings("waiting", from_val.string);
+    const to_val = transition.object.get("to") orelse return error.NoTo;
+    try testing.expect(to_val == .string);
+    try testing.expectEqualStrings("todo", to_val.string);
 
     try testing.expect(!fs.dirExists(".gila/waiting/wait_trans_xyz"));
     try testing.expect(fs.dirExists(".gila/todo/wait_trans_xyz"));
@@ -1844,10 +2971,45 @@ test "workflow: create multiple tasks then find by tag" {
     runServer(fs, &arena);
 
     const response = fs.getStdout();
-    try expectResponseContains(response, "Backend Feature");
-    try expectResponseContains(response, "Frontend Feature");
-    try expectResponseNotContains(response, "Bug Fix");
-    try expectResponseContains(response, "\"count\":2");
+    const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response, .{});
+    defer parsed.deinit();
+    const root_value = parsed.value;
+    try testing.expect(root_value == .object);
+
+    const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+    try testing.expect(jsonrpc_val == .string);
+    try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+    const id_val = root_value.object.get("id") orelse return error.NoId;
+    try testing.expect(id_val == .integer);
+    try testing.expectEqual(@as(i64, 503), id_val.integer);
+
+    const result_val = root_value.object.get("result") orelse return error.NoResult;
+    try testing.expect(result_val == .object);
+
+    const tasks_val = result_val.object.get("tasks") orelse return error.NoTasks;
+    try testing.expect(tasks_val == .array);
+
+    const count_val = result_val.object.get("count") orelse return error.NoCount;
+    try testing.expect(count_val == .integer);
+    try testing.expectEqual(@as(i64, 2), count_val.integer);
+
+    var found_backend = false;
+    var found_frontend = false;
+    for (tasks_val.array.items) |task| {
+        try testing.expect(task == .object);
+        const title_val = task.object.get("title") orelse continue;
+        try testing.expect(title_val == .string);
+        if (std.mem.eql(u8, title_val.string, "Backend Feature")) {
+            found_backend = true;
+        }
+        if (std.mem.eql(u8, title_val.string, "Frontend Feature")) {
+            found_frontend = true;
+        }
+        try testing.expect(!std.mem.eql(u8, title_val.string, "Bug Fix"));
+    }
+    try testing.expect(found_backend);
+    try testing.expect(found_frontend);
 }
 
 test "workflow: create with waiting_on then mark dependency done then sync" {
@@ -1879,8 +3041,23 @@ test "workflow: create with waiting_on then mark dependency done then sync" {
     runServer(fs, &arena);
 
     const waiting_response = fs.getStdout();
-    try expectResponseContains(waiting_response, "\"status\":\"waiting\"");
-    const waiting_id = try extractTaskIdFromResponse(testing.allocator, waiting_response);
+    const waiting_id = blk: {
+        const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, waiting_response, .{});
+        defer parsed.deinit();
+        const root_value = parsed.value;
+        try testing.expect(root_value == .object);
+
+        const result_val = root_value.object.get("result") orelse return error.NoResult;
+        try testing.expect(result_val == .object);
+
+        const status_val = result_val.object.get("status") orelse return error.NoStatus;
+        try testing.expect(status_val == .string);
+        try testing.expectEqualStrings("waiting", status_val.string);
+
+        const task_id_val = result_val.object.get("task_id") orelse return error.NoTaskId;
+        try testing.expect(task_id_val == .string);
+        break :blk task_id_val.string;
+    };
 
     var waiting_path_buf: [256]u8 = undefined;
     const waiting_path = std.fmt.bufPrint(&waiting_path_buf, ".gila/waiting/{s}", .{waiting_id}) catch unreachable;
@@ -1907,8 +3084,41 @@ test "workflow: create with waiting_on then mark dependency done then sync" {
     runServer(fs, &arena);
 
     const sync_response = fs.getStdout();
-    try expectResponseContains(sync_response, waiting_id);
-    try expectResponseContains(sync_response, "removed_completed_dependency");
+    {
+        const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, sync_response, .{});
+        defer parsed.deinit();
+        const root_value = parsed.value;
+        try testing.expect(root_value == .object);
+
+        const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+        try testing.expect(jsonrpc_val == .string);
+        try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+        const id_val = root_value.object.get("id") orelse return error.NoId;
+        try testing.expect(id_val == .integer);
+        try testing.expectEqual(@as(i64, 513), id_val.integer);
+
+        const result_val = root_value.object.get("result") orelse return error.NoResult;
+        try testing.expect(result_val == .object);
+
+        const updates_val = result_val.object.get("updates") orelse return error.NoUpdates;
+        try testing.expect(updates_val == .array);
+
+        var found_update = false;
+        for (updates_val.array.items) |update| {
+            try testing.expect(update == .object);
+            const task_id = update.object.get("task_id") orelse continue;
+            try testing.expect(task_id == .string);
+            if (std.mem.eql(u8, task_id.string, waiting_id)) {
+                const update_change = update.object.get("change") orelse continue;
+                try testing.expect(update_change == .string);
+                if (std.mem.eql(u8, update_change.string, "removed_completed_dependency")) {
+                    found_update = true;
+                }
+            }
+        }
+        try testing.expect(found_update);
+    }
 
     try testing.expect(!fs.dirExists(waiting_path));
     var todo_path_buf: [256]u8 = undefined;
@@ -1945,9 +3155,35 @@ test "workflow: create tasks then list with pagination" {
     runServer(fs, &arena);
 
     const response1 = fs.getStdout();
-    try expectResponseContains(response1, "\"available\":5");
-    try expectResponseContains(response1, "\"limit\":2");
-    try expectResponseContains(response1, "\"offset\":0");
+    {
+        const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response1, .{});
+        defer parsed.deinit();
+        const root_value = parsed.value;
+        try testing.expect(root_value == .object);
+
+        const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+        try testing.expect(jsonrpc_val == .string);
+        try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+        const id_val = root_value.object.get("id") orelse return error.NoId;
+        try testing.expect(id_val == .integer);
+        try testing.expectEqual(@as(i64, 525), id_val.integer);
+
+        const result_val = root_value.object.get("result") orelse return error.NoResult;
+        try testing.expect(result_val == .object);
+
+        const available_val = result_val.object.get("available") orelse return error.NoAvailable;
+        try testing.expect(available_val == .integer);
+        try testing.expectEqual(@as(i64, 5), available_val.integer);
+
+        const limit_val = result_val.object.get("limit") orelse return error.NoLimit;
+        try testing.expect(limit_val == .integer);
+        try testing.expectEqual(@as(i64, 2), limit_val.integer);
+
+        const offset_val = result_val.object.get("offset") orelse return error.NoOffset;
+        try testing.expect(offset_val == .integer);
+        try testing.expectEqual(@as(i64, 0), offset_val.integer);
+    }
 
     fs.clearStdout();
     _ = arena.reset(false);
@@ -1959,9 +3195,35 @@ test "workflow: create tasks then list with pagination" {
     runServer(fs, &arena);
 
     const response2 = fs.getStdout();
-    try expectResponseContains(response2, "\"available\":5");
-    try expectResponseContains(response2, "\"limit\":2");
-    try expectResponseContains(response2, "\"offset\":2");
+    {
+        const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, response2, .{});
+        defer parsed.deinit();
+        const root_value = parsed.value;
+        try testing.expect(root_value == .object);
+
+        const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+        try testing.expect(jsonrpc_val == .string);
+        try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+        const id_val = root_value.object.get("id") orelse return error.NoId;
+        try testing.expect(id_val == .integer);
+        try testing.expectEqual(@as(i64, 526), id_val.integer);
+
+        const result_val = root_value.object.get("result") orelse return error.NoResult;
+        try testing.expect(result_val == .object);
+
+        const available_val = result_val.object.get("available") orelse return error.NoAvailable;
+        try testing.expect(available_val == .integer);
+        try testing.expectEqual(@as(i64, 5), available_val.integer);
+
+        const limit_val = result_val.object.get("limit") orelse return error.NoLimit;
+        try testing.expect(limit_val == .integer);
+        try testing.expectEqual(@as(i64, 2), limit_val.integer);
+
+        const offset_val = result_val.object.get("offset") orelse return error.NoOffset;
+        try testing.expect(offset_val == .integer);
+        try testing.expectEqual(@as(i64, 2), offset_val.integer);
+    }
 }
 
 test "workflow: find by status after updates" {
@@ -2010,9 +3272,43 @@ test "workflow: find by status after updates" {
     runServer(fs, &arena);
 
     const find_todo = fs.getStdout();
-    try expectResponseContains(find_todo, "Will Stay Todo");
-    try expectResponseNotContains(find_todo, "Will Start");
-    try expectResponseContains(find_todo, "\"count\":1");
+    {
+        const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, find_todo, .{});
+        defer parsed.deinit();
+        const root_value = parsed.value;
+        try testing.expect(root_value == .object);
+
+        const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+        try testing.expect(jsonrpc_val == .string);
+        try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+        const id_val = root_value.object.get("id") orelse return error.NoId;
+        try testing.expect(id_val == .integer);
+        try testing.expectEqual(@as(i64, 533), id_val.integer);
+
+        const result_val = root_value.object.get("result") orelse return error.NoResult;
+        try testing.expect(result_val == .object);
+
+        const tasks_val = result_val.object.get("tasks") orelse return error.NoTasks;
+        try testing.expect(tasks_val == .array);
+
+        const count_val = result_val.object.get("count") orelse return error.NoCount;
+        try testing.expect(count_val == .integer);
+        try testing.expectEqual(@as(i64, 1), count_val.integer);
+
+        // Verify "Will Stay Todo" is in results, "Will Start" is not
+        var found_stay = false;
+        for (tasks_val.array.items) |task| {
+            try testing.expect(task == .object);
+            const title_val = task.object.get("title") orelse continue;
+            try testing.expect(title_val == .string);
+            if (std.mem.eql(u8, title_val.string, "Will Stay Todo")) {
+                found_stay = true;
+            }
+            try testing.expect(!std.mem.eql(u8, title_val.string, "Will Start"));
+        }
+        try testing.expect(found_stay);
+    }
 
     fs.clearStdout();
     _ = arena.reset(false);
@@ -2024,7 +3320,41 @@ test "workflow: find by status after updates" {
     runServer(fs, &arena);
 
     const find_started = fs.getStdout();
-    try expectResponseContains(find_started, "Will Start");
-    try expectResponseNotContains(find_started, "Will Stay Todo");
-    try expectResponseContains(find_started, "\"count\":1");
+    {
+        const parsed = try std.json.parseFromSlice(std.json.Value, testing.allocator, find_started, .{});
+        defer parsed.deinit();
+        const root_value = parsed.value;
+        try testing.expect(root_value == .object);
+
+        const jsonrpc_val = root_value.object.get("jsonrpc") orelse return error.NoJsonRpc;
+        try testing.expect(jsonrpc_val == .string);
+        try testing.expectEqualStrings("2.0", jsonrpc_val.string);
+
+        const id_val = root_value.object.get("id") orelse return error.NoId;
+        try testing.expect(id_val == .integer);
+        try testing.expectEqual(@as(i64, 534), id_val.integer);
+
+        const result_val = root_value.object.get("result") orelse return error.NoResult;
+        try testing.expect(result_val == .object);
+
+        const tasks_val = result_val.object.get("tasks") orelse return error.NoTasks;
+        try testing.expect(tasks_val == .array);
+
+        const count_val = result_val.object.get("count") orelse return error.NoCount;
+        try testing.expect(count_val == .integer);
+        try testing.expectEqual(@as(i64, 1), count_val.integer);
+
+        // Verify "Will Start" is in results, "Will Stay Todo" is not
+        var found_start = false;
+        for (tasks_val.array.items) |task| {
+            try testing.expect(task == .object);
+            const title_val = task.object.get("title") orelse continue;
+            try testing.expect(title_val == .string);
+            if (std.mem.eql(u8, title_val.string, "Will Start")) {
+                found_start = true;
+            }
+            try testing.expect(!std.mem.eql(u8, title_val.string, "Will Stay Todo"));
+        }
+        try testing.expect(found_start);
+    }
 }

@@ -185,7 +185,9 @@ fn parseValue(
             if (std.mem.startsWith(u8, nl[i..], "- ")) {
                 if (nl[i..].len < 3) return Error(diagnostics, "Insufficient data", line_number.*, column.*, column.*);
                 num_elements += 1;
-                _ = arena.pushString(nl[i..]);
+                _ = arena.pushString(nl[i + 2 ..]);
+                const v = arena.push(u8);
+                v.* = '\n';
                 line.* = reader.takeDelimiter('\n') catch return Error(diagnostics, "Buffer too small for line or read failed", line_number.*, column.*, column.*);
             } else {
                 break;
@@ -195,10 +197,9 @@ fn parseValue(
         var lines = arena.memory[start..arena.currentPosition()];
         const elements = arena.pushArray([]const u8, num_elements);
         for (0..num_elements) |index| {
-            lines = lines[2..];
-            const end = std.mem.indexOfScalar(u8, lines, '-') orelse lines.len;
+            const end = std.mem.indexOfScalar(u8, lines, '\n') orelse lines.len;
             elements[index] = arena.pushString(lines[0..end]);
-            lines = lines[end..];
+            lines = lines[end + 1 ..];
         }
         return elements;
     }

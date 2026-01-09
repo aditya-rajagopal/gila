@@ -1,12 +1,11 @@
 ---
 title: Refactor common FS operations
-status: waiting
+status: done
 priority_value: 50
 priority: low
 owner: adiraj
 created: 2025-12-12T17:08:20Z
-waiting_on: 
-- "[[nifty_giant_mqa]]"
+completed: 2026-01-09T06:19:25Z
 tags: 
 - cleanup
 ---

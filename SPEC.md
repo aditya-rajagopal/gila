@@ -1,7 +1,7 @@
 # GILA
 
 > Version: 0.3.0
-> Status: Draft
+> Status: DRAFT
 > Date: 2026-01-09
 
 ## 1. Abstract
@@ -29,10 +29,15 @@ in this document are to be interpreted as described in [RFC 2119](https://www.ie
 ### 2.2. Domain Terms
 
 **Task**: A single trackable unit of work identified by a unique TASKID.
+
 **TASKID**: A unique identifier for a Task following the format defined in Section 5.
+
 **Status**: The current state of a Task. One of: `todo`, `started`, `done`, `cancelled`, or `waiting`.
+
 **Priority**: The urgency level of a Task. One of: `low`, `medium`, `high`, or `urgent`.
+
 **Frontmatter**: The YAML metadata block at the beginning of a task file, delimited by `---` lines.
+
 **Description**: The freeform markdown content following the frontmatter.
 
 ## 3. File System Structure
@@ -104,15 +109,19 @@ Example: `blaring_magma_6kr`
 
 ### 4.2. Generation Requirements
 
-Implementations generating TASKIDs SHOULD provide sufficient entropy to minimize collision probability. The RECOMMENDED minimum is 2^32 possible unique identifiers.
-This heavily depends on the usecase and the desired level of security.
+Implementations generating TASKIDs SHOULD provide sufficient entropy to minimize collision probability. 
+This heavily depends on the usecase and the desired level of security and is beyond the scope of this specification.
 
-To achieve this minimum entropy with the recommended format:
+The RECOMMENDED minimum is 2^32 possible unique identifiers. To achieve this minimum entropy with the recommended format:
 - First word pool: at least 1024 unique words (10 bits)
 - Second word pool: at least 128 unique words (7 bits)
 - Base32 suffix: 3 characters providing 15 bits
 
 Total: 10 + 7 + 15 = 32 bits of entropy.
+
+An implementation MAY
+- Generate a random id and retry until a unique one is found or give up and ask the user to retry
+- Generate a random id from an authoritative source especially in multi-user environments
 
 ### 4.3. Validation Rules
 
@@ -131,16 +140,19 @@ When referencing a task within markdown content (such as the description field),
 [[taskid]]
 ```
 
-When referencing a task within source code comments, use:
-
-```
-GILA(taskid)
-```
-
 The `waiting_on` field uses a quoted variant of the markdown format:
 
 ```
 "[[taskid]]"
+```
+
+This is mostly designed to be useful in [Obsidian](https://obsidian.md/) notes. Additionally, it is easily identifiable
+when parsing files for tools.
+
+When referencing a task within source code comments, use:
+
+```
+GILA(taskid)
 ```
 
 ## 5. Task File Format
@@ -176,8 +188,8 @@ The following fields MUST be present in every task file:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `status` | enum | Current task state |
 | `title` | string | Human-readable task title |
+| `status` | enum | Current task state |
 | `priority` | enum | Task priority level |
 | `priority_value` | integer | Numeric priority (0-255) |
 | `owner` | string | Task owner identifier |
@@ -383,7 +395,7 @@ The following MUST be enforced if a task's status must:
    - Remove `completed` if present
    - If the task has a `waiting_on` if present all referenced tasks MUST be `done` or `cancelled`. The `waiting_on` list MUST be discarded.
 
-4. **Move task directory** to the new status directory preserving any supplemental files within with no modifications.
+**Move task directory** to the new status directory preserving any supplemental files within with no modifications.
 
 ## 9. Extensibility
 

@@ -60,10 +60,14 @@ echo '{"jsonrpc":"2.0","method":"task/create","params":{"title":"Test task","use
 
 ## Why?
 
-I often have `TODO` comments littered throughout
-my codebase and I dont like it. It is easy to forget and hard to track. I also dislike tools like JIRA and Github issues for creating tasks as I usually just want
-some place to add information like images, debug logs, and thoughts for me to reference later. Lastly I value being able to 
-locally view all my tasks and check them in when I sync my repositories across multiple machines. So i made this and:
+Very often during development I tend to create tasks within comments for me to come back to later. This is usually out of date
+and is hard to add more information to and find when more information comes along. The littered `TODO` comments throughout
+my codebase are easy to forget and hard to track. I switched to using google docs where I essentially maintained a bullet journal
+but that got unwieldy really quickly. I also dislike tools like JIRA and Github-issues for creating tasks as I usually just want
+some place to add information like images, debug logs, and thoughts for me to reference later. 
+Lastly I value being able to 
+locally view all my tasks and check them in when I sync my repositories across multiple machines. Hence this 
+portable and lightweight specification for creating and managing tasks.
 
 * The tasks live where your code lives. Syncing your repo syncs your tasks.
 * Each task is just a Markdown file with simple frontmatter. Readable everywhere.

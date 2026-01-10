@@ -1,29 +1,14 @@
 # GILA
 
-> VERSION: 0.2.0
-> STATUS: DRAFT
-> DATE: 2025-12-16
+> Version: 0.3.0
+> Status: Draft
+> Date: 2026-01-09
 
-## Abstract
+## 1. Abstract
 
-This document describes the GILA specification for a local plain-text task tracking system for developers. It is designed to be 
-simple to implement to allow anyone to create tools to read and manage these files in any development environement.
-A feature of GILA is that the artifacts are meant to be local and human readable and commitable to remote repositories.
-
-## Introduction
-
-### Motivation
-
-Very often while during development I tend to create tasks within comments for me to come back to later. Often this is disorganized
-and it is hard to add more information to them when more information comes along. I often have `TODO` comments littered throughout
-my codebase and I dont like it. I also dislike tools like JIRA and Github issues for creating tasks as I usually just want
-some place to add information like images, debug logs, and thoughts for me to reference later. Lastly I value being able to 
-locally view all my tasks and check them in when I sync my repositories across multiple machines. The aim is to create a 
-portable and lightweight specification for creating and managing tasks.
-
-### Scope
-
-GILA is a specification and not a specific tool.
+This document defines GILA, a plain-text task tracking system designed for software developers. 
+GILA stores tasks as human-readable markdown files with YAML frontmatter in a `.gila` directory structure. 
+The format is designed to be version-control friendly, portable across development environments, and simple enough for any tool to implement.
 
 GILA is designed to be
 * Local plain-text: All the artifacts are meant to be local and human readable and commitable to remote repositories.
@@ -34,141 +19,389 @@ GILA is designed to be
 GILA is ***NOT*** designed to be
 * Generic: It is not meant to be a generic task tracking system without extensions designed for specific needs
 
-The specification gives definitions of the format for the file tree, naming conventions, and the structure of the files.
-Additionally there may be suggestions for task generation and parsing tools. Rationale for these will be provided when possible, 
-though it is not required.
+## 2. Terminology
 
-## Terminology
+### 2.1. Terminology
 
-* **Task**: A single artifact identified by a **TASKID**.
-* **TASKID**: A unique identifier for a **Task**. See [TASKID](#taskid) for more information.
-* **Status**: A state a **Task** can be in. Can be one of `todo`, `done`, `started`, `cancelled`, or `waiting`.
-* **Description**: A structured description of a **Task**.
-* **Tags**: A list of strings that can be used to categorize **Tasks**.
-* **Priority**: The priority of the task. Can be one of `low`, `medium`, `high`, or `urgent`. Can also have an optional integer value.
-* **Created Date**: The date when the task artifact was created.
-* **Completed Date**: The date when the task was completed.
-* **Owner**: The person who owns the task.
+The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" 
+in this document are to be interpreted as described in [RFC 2119](https://www.ietf.org/rfc/rfc2119.txt).
 
-## File Tree
+### 2.2. Domain Terms
 
-All artifacts must be stored in a directory called `.gila`. Each folder with this name represents tasks for a single project.
+**Task**: A single trackable unit of work identified by a unique TASKID.
+**TASKID**: A unique identifier for a Task following the format defined in Section 5.
+**Status**: The current state of a Task. One of: `todo`, `started`, `done`, `cancelled`, or `waiting`.
+**Priority**: The urgency level of a Task. One of: `low`, `medium`, `high`, or `urgent`.
+**Frontmatter**: The YAML metadata block at the beginning of a task file, delimited by `---` lines.
+**Description**: The freeform markdown content following the frontmatter.
 
-The children of this directory **may** contain a folder for each **Status** that the task can be in. It is recommended 
-to create a **Status** folder only if a task exists in that status currently or has been in that status in the past.
+## 3. File System Structure
 
-Each **Status** folder contains one folder for each **Task** that is in that status. The name of the folder must be the **TaskID** of the task.
-See [TASKID](#taskid) for more information on the format. 
+### 3.1. Root Directory
 
-Each **Task** folder **must** contain the following files:
+All GILA artifacts MUST be stored in a directory named `.gila` at the project root. Each `.gila` directory represents tasks for a single project.
 
-* `(TASKID).md`: A markdown file containing the description of the **Task** with the same task_id as the folder name.
+The `.gila` directory is intended to be committed to version control alongside project source code.
 
-NOTE: When there is a descrepancy between the contents of `.md` file of the [TASKID](#taskid) and its location the contents of `*.md` must be used.
-And tools should warn users and move the contents of the **Task** folder to the correct location. e.g. if it is in the `todo` folder but
-the status in `(TASKID).md` was changed to DONE externally the task should be moved to DONE the next time the tool is run.
+### 3.2. Status Directories
 
-**All** files and folders other than the ones speficially mentioned above are considered supplemental to the project, status, or task 
-depending on where they are located. It is recommended to put all files and folders related to a specific **Task** in the directory with its unique identifier.
-The entire `.gila` directory is intended to be committed to a remote repository.
+The `.gila` directory MUST contain subdirectories for each status value IF there is a task with that status:
+Implementations MUST NOT require all status directories to be present if there are no tasks in that status.
 
-### Example
+### 3.3. Task Directories
+
+Each task is stored in its own directory within the appropriate status directory. The directory name MUST be the TASKID of the task:
 
 ```
-.gila
-├── todo
-│   ├── blaring_magma_6kr
-│   │   ├── blaring_magma_6kr.md
-│   │   └── supplemental_file1
-└── done
-    ├── ashamed_thorn_0ka
-    │   ├── ashamed_thorn_0ka.md
-    │   ├── supplemental_file1
-    │   └── supplemental_file2
-    └── lucky_nimbus_bqc
-        └── lucky_nimbus_bqc.md
+.gila/{status}/{taskid}/
 ```
 
-### Task
-
-### TASKID
-
-Each task is to be created with a unique identifier. The identifier has the following format:
-
-`word_word_ccc`
-
-Where:
-
-* `word` is any word in the language of the user
-* `ccc` is a 3 digit base32 number
-
-The choice of words must be large enough so that random id generation has enough entropy to avoid collisions.
-Look into the birthday paradox for more information.
-
-A random 3 digit base32 number represents `2^15` unique ids. If you have a dictionary of `2^9` words you can generate
-`2^9 * 2^9 * 2^15 = 2^33` unique ids which is large enough for most projects. If you require more collision resistance you can use
-a larger dictionary.
-
-For tools it is recommended to use atleast a total of `2^32` unique ids to avoid collisions.
-Also it is recommended to have(depending on the language) the use of a different dictionary of word for the first and second word.
-With one being an adjective and the other being a noun. This will help the id be more memorable and readable.
-
-With `2^32` ids, the chance of collision after generating:
-
-| Number of tasks | Collision probability |
-| :--- | :--- |
-| 1,000 | <0.01% |
-| 10,000 | 1.13% |
-| 77,000 | ~50% |
+Each task directory MUST contain exactly one task file named `{taskid}.md`.
 
 Example:
+```
+.gila/todo/blaring_magma_6kr/blaring_magma_6kr.md
+```
 
-`blaring_magma_6kr`
+### 3.4. Source of Truth
 
-### Referencing Tasks
+When the status indicated by a task's directory location differs from the `status` field in the task file, the task file MUST be treated as authoritative.
 
-Anywhere a task is to be referenced it should be in one of the following formats:
-* `[[TASKID]]`: This is the preferred format for referencing a task in the **Description** file.
-* `GILA(TASKID)`: This is the preferred format for referencing a task in a comment within code.
+Implementations SHOULD:
+1. Log a warning when this discrepancy is detected
+2. Move the task directory to match the file's status during synchronization
 
-### Task Description
+### 3.5. Supplemental Files
 
-Each **Task** Folder contains a file called `(TASKID).md`. The file **must** have the following header:
+Any files or directories within the GILA proejct other than those required by the SPEC considered supplemental materials. These MAY include:
+
+- Screenshots or images
+- Log files
+- Related documentation
+- Any other files relevant to the task
+
+Implementations MUST NOT read or write to these supplemental files. When tasks are transitioned to a new status,
+implmentations MUST preserve the supplemental files relative to its original task.
+
+## 4. Task Identifier (TASKID)
+
+### 4.1. Format
+
+A TASKID MUST follow this format:
+
+```
+{word}_{word}_{base32}
+```
+
+Where:
+- `{word}` is an alphabetic string (a-z, case-insensitive)
+- `{base32}` is exactly 3 characters from the base32 alphabet
+- The base32 alphabet MUST be: `0123456789abcdefghjkmnpqrstvwxyz`. This alphabet excludes the characters `i`, `l`, `o`, and `u` to avoid visual ambiguity.
+
+The recommended structure uses an adjective for the first word and a noun for the second word to improve memorability.
+
+Example: `blaring_magma_6kr`
+
+### 4.2. Generation Requirements
+
+Implementations generating TASKIDs SHOULD provide sufficient entropy to minimize collision probability. The RECOMMENDED minimum is 2^32 possible unique identifiers.
+This heavily depends on the usecase and the desired level of security.
+
+To achieve this minimum entropy with the recommended format:
+- First word pool: at least 1024 unique words (10 bits)
+- Second word pool: at least 128 unique words (7 bits)
+- Base32 suffix: 3 characters providing 15 bits
+
+Total: 10 + 7 + 15 = 32 bits of entropy.
+
+### 4.3. Validation Rules
+
+A valid TASKID MUST satisfy all of the following:
+
+1. Contain exactly two underscore characters
+2. The final underscore MUST be at position `length - 4` (i.e., exactly 3 characters follow it)
+3. The final 3 characters MUST be from the base32 alphabet
+4. All characters before the final 3 MUST be alphabetic (a-z) or underscore
+
+### 4.4. Referencing Tasks
+
+When referencing a task within markdown content (such as the description field), use:
+
+```
+[[taskid]]
+```
+
+When referencing a task within source code comments, use:
+
+```
+GILA(taskid)
+```
+
+The `waiting_on` field uses a quoted variant of the markdown format:
+
+```
+"[[taskid]]"
+```
+
+## 5. Task File Format
+
+### 5.1. File Naming
+
+The task file MUST be named `{taskid}.md` where `{taskid}` is the task's identifier.
+
+### 5.2. Frontmatter Structure
+
+A task file MUST begin with YAML frontmatter enclosed by `---` delimiters:
 
 ```
 ---
-status: <todo|done|in_progress|cancelled|waiting>
-priority: <low|medium|high|urgent>
-priority_value: 0-255
-owner: <Owner>
-created: YYYY-MM-DDTHH:MM:SSZ
-completed: YYYY-MM-DDTHH:MM:SSZ (only if status is DONE or CANCELLED)
-waiting_on:
-- "[[TaskID]]"
-- "[[TaskID]]"
-- ... (only if status is WAITING)
-<optional fields>
-tags:
-- <Tag1>
-- <Tag2>
-- ...
-</optional fields>
-<user fields>
+{field}: {value}
 ...
-</user fields>
 ---
-... Description of the task ...
-
+{description}
 ```
 
-NOTE: All times must be in UTC and are formatted as `YYYY-MM-DDTHH:MM:SSZ`.
+Fields MUST appear one per line in the format `{field}: {value}`.
 
-There are fields that **must** be present in the **Header** that are situationally:
+List fields use YAML list syntax:
+```
+{field}:
+- {item1}
+- {item2}
+```
 
-* `waiting_on`: only present if the task is in the `waiting` status. This contains a list of **Task**s that need to be completed before this task can be completed. 
-* `completed`: only present if the task is in the `done` or `cancelled` status. 
+### 5.3. Required Fields
 
-There are optional fileds that need not be present at all to be a valid **Description**:
+The following fields MUST be present in every task file:
 
-* `tags`: A list of tags with one tag per line that must start with a `-`. The tags can be used to categorize tasks.
+| Field | Type | Description |
+|-------|------|-------------|
+| `status` | enum | Current task state |
+| `title` | string | Human-readable task title |
+| `priority` | enum | Task priority level |
+| `priority_value` | integer | Numeric priority (0-255) |
+| `owner` | string | Task owner identifier |
+| `created` | datetime | Creation timestamp |
 
+### 5.4. Conditional Fields
+
+These fields are required or prohibited based on task status:
+
+| Field | Type | Condition |
+|-------|------|-----------|
+| `completed` | datetime | REQUIRED if status is `done` or `cancelled`; MUST NOT be present otherwise |
+| `waiting_on` | list | REQUIRED if status is `waiting` |
+
+### 5.5. Optional Fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `tags` | list | Categorization tags |
+
+When the `tags` field is present, it MUST contain at least one tag.
+
+### 5.6. Extension Fields
+
+Implementations MUST preserve any fields not defined in this specification. Unknown fields MUST be written back to the file unchanged when the task is modified.
+
+This mechanism allows tools to add custom metadata without breaking compatibility with other implementations.
+
+### 5.7. Description Body
+
+All content after the closing `---` delimiter is the task description. This content:
+
+- MAY be empty
+- MAY contain arbitrary markdown
+- Has no required structure
+- SHOULD NOT be parsed or validated by implementations
+
+## 6. Field Specifications
+
+### 6.1. title
+
+**Type**: String
+
+**Validation**:
+- MUST NOT be empty
+- MUST NOT contain carriage return (`\r`) or line feed (`\n`) characters
+
+### 6.2. status
+
+**Type**: Enumeration
+
+**Values**:
+- `todo` - Task has not been started
+- `started` - Task is actively being worked on
+- `done` - Task has been completed successfully
+- `cancelled` - Task has been abandoned without completion
+- `waiting` - Task is blocked pending completion of other tasks
+
+**Validation**: Value MUST be one of the defined values (case-sensitive).
+
+### 6.3. priority
+
+**Type**: Enumeration
+
+**Values**:
+- `low`
+- `medium`
+- `high`
+- `urgent`
+
+**Validation**: Value MUST be one of the defined values (case-sensitive).
+
+### 6.4. priority_value
+
+**Type**: Unsigned 8-bit integer
+
+**Range**: 0-255
+
+**Description**: Provides fine-grained priority ordering within a priority level. Higher values indicate higher priority.
+
+**Validation**: Value MUST be in the range 0-255.
+
+### 6.5. owner
+
+**Type**: String
+
+**Validation**: MUST NOT be empty. MUST NOT contain carriage return (`\r`) or line feed (`\n`) characters.
+
+It is RECOMMENDED to use a consistent identifier such as a username or email address.
+
+### 6.6. created
+
+**Type**: Datetime
+
+**Format**: ISO 8601 UTC timestamp: `YYYY-MM-DDTHH:MM:SSZ`
+
+**Example**: `2026-01-09T14:30:00Z`
+
+**Validation**: MUST be a valid UTC timestamp with `Z` suffix.
+
+### 6.7. completed
+
+**Type**: Datetime
+
+**Format**: ISO 8601 UTC timestamp: `YYYY-MM-DDTHH:MM:SSZ`
+
+**Constraints**:
+- MUST be present when status is `done` or `cancelled`
+- MUST NOT be present when status is `todo`, `started`, or `waiting`
+
+### 6.8. waiting_on
+
+**Type**: List of strings
+
+**Format**: Each item MUST be a quoted TASKID reference: `"[[taskid]]"`
+
+**Example**:
+```yaml
+waiting_on:
+- "[[blaring_magma_6kr]]"
+- "[[lucky_nimbus_bqc]]"
+```
+
+**Requirements**:
+- Each item MUST match the pattern `"[[{taskid}]]"` where `{taskid}` is a valid TASKID else it MUST be removed from the list.
+- The list MUST NOT be empty when present
+- Referenced tasks SHOULD exist (implementations MAY warn when references cannot be resolved)
+- If an operation to remove a reference task causes the list to become empty, the task MUST be transitioned to `todo`
+
+**Constraints**:
+- MUST be present when status is `waiting`
+- MUST NOT be present when status is `done`, or `cancelled`
+- If present in a `todo` or `started` task, an implementation MUST transition the task to `waiting`
+
+Implementations MAY discard tasks from the `waiting_on` list if:
+- The referenced task is not found
+- The referenced task is `done` or `cancelled`
+
+### 6.9. tags
+
+**Type**: List of strings
+
+**Example**:
+```yaml
+tags:
+- backend
+- urgent
+- sprint-42
+```
+
+**Validation**:
+- When present, MUST contain at least one tag
+- Individual tags MUST NOT be empty
+- Individual tags MUST NOT contain `\r` or `\n` characters
+
+## 7. Validation Rules
+
+### 7.1. Structural Validation
+
+Implementations MUST validate:
+
+1. The file begins with `---` on the first line
+2. A second `---` line exists to close the frontmatter
+3. All required fields are present
+4. Field values match their specified types
+5. The TASKID is valid per Section 4.3
+6. The `title`, `owner`, `priority`, `priority_value`, `status`, and `created` fields are non-empty
+7. Each field values must be valid per specifications in section [6](#6-field-specifications)
+
+### 7.2. Reference Validation
+
+Implementations SHOULD validate that TASKIDs referenced in `waiting_on` correspond to existing tasks. When a referenced task cannot be found:
+- Implementations SHOULD log a warning
+- Implementations MAY treat this as a non-fatal validation issue
+- Implementations MUST NOT silently ignore missing references
+- Implementations MAY modify the `waiting_on` list only if the referenced task is `done` or `cancelled` or if the referenced task is not found
+
+### 7.3. Status-Field Constraints
+
+The following constraints MUST be enforced:
+
+| Status | `completed` | `waiting_on` |
+|--------|-------------|--------------|
+| `todo` | MUST NOT be present | MUST NOT be present. If present must be transitioned to `waiting` |
+| `started` | MUST NOT be present | MUST NOT be present. If present must be transitioned to `waiting` |
+| `done` | MUST be present | MUST NOT be present |
+| `cancelled` | MUST be present | MUST NOT be present |
+| `waiting` | MUST NOT be present | MUST be present (non-empty). If empty, must be transitioned to `todo` |
+
+## 8. Status Transitions
+
+The following MUST be enforced if a task's status must:
+
+1. **Transition to `done` or `cancelled`**:
+   - If the task has a `waiting_on` if present all referenced tasks MUST be `done` or `cancelled`. The `waiting_on` list MUST be discarded.
+   - Set `completed` to the current UTC timestamp if not already set
+
+2. **Transition to `waiting`**:
+   - Ensure `waiting_on` contains at least one valid reference
+   - MUST NOT be in `done` or `cancelled` status
+
+3. **Transition to `todo` or `started`**:
+   - Remove `completed` if present
+   - If the task has a `waiting_on` if present all referenced tasks MUST be `done` or `cancelled`. The `waiting_on` list MUST be discarded.
+
+4. **Move task directory** to the new status directory preserving any supplemental files within with no modifications.
+
+## 9. Extensibility
+
+### 9.1. Custom Fields
+
+Implementations MAY add custom fields to the frontmatter. Custom fields:
+
+- MUST NOT conflict with field names defined in this specification
+- SHOULD use a namespace prefix to avoid future conflicts (e.g., `x-myapp-field`)
+- MUST be preserved by other implementations that do not recognize them
+
+### 9.2. Supplemental Files
+
+Task directories MAY contain any additional files. Common uses include:
+
+- Screenshots demonstrating bugs
+- Log files for debugging
+- Design documents or mockups
+- Related data files
+
+Implementations MUST preserve supplemental files when moving task directories.

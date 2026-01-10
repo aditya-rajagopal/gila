@@ -21,24 +21,15 @@ GILA is ***NOT*** designed to be
 
 ## 2. Terminology
 
-### 2.1. Terminology
-
 The key words "MUST", "MUST NOT", "REQUIRED", "SHALL", "SHALL NOT", "SHOULD", "SHOULD NOT", "RECOMMENDED", "MAY", and "OPTIONAL" 
 in this document are to be interpreted as described in [RFC 2119](https://www.ietf.org/rfc/rfc2119.txt).
 
-### 2.2. Domain Terms
-
-**Task**: A single trackable unit of work identified by a unique TASKID.
-
-**TASKID**: A unique identifier for a Task following the format defined in Section 5.
-
-**Status**: The current state of a Task. One of: `todo`, `started`, `done`, `cancelled`, or `waiting`.
-
-**Priority**: The urgency level of a Task. One of: `low`, `medium`, `high`, or `urgent`.
-
-**Frontmatter**: The YAML metadata block at the beginning of a task file, delimited by `---` lines.
-
-**Description**: The freeform markdown content following the frontmatter.
+- **Task**: A single trackable unit of work identified by a unique TASKID.
+- **TASKID**: A unique identifier for a Task following the format defined in Section 5.
+- **Status**: The current state of a Task. One of: `todo`, `started`, `done`, `cancelled`, or `waiting`.
+- **Priority**: The urgency level of a Task. One of: `low`, `medium`, `high`, or `urgent`.
+- **Frontmatter**: The YAML metadata block at the beginning of a task file, delimited by `---` lines.
+- **Description**: The freeform markdown content following the frontmatter.
 
 ## 3. File System Structure
 

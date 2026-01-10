@@ -243,7 +243,8 @@ fn handleRequest(
 }
 
 const testing = std.testing;
-const TestFs = @import("../testfs/root.zig").TestFs;
+const builtin = @import("builtin");
+const TestFs = if (builtin.is_test) @import("test_fs").TestFs else void;
 const test_utils = @import("test_utils.zig");
 
 const initGilaProject = test_utils.initGilaProject;

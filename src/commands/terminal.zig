@@ -133,11 +133,12 @@ pub const Terminal = struct {
 
     pub fn clearScreen(self: *Terminal) error{WriteFailed}!void {
         self.write("\x1b[2J\x1b[H") catch return error.WriteFailed;
+        self.flush() catch return error.WriteFailed;
     }
 
     pub fn setCursorPosition(self: *Terminal, x: u16, y: u16) error{WriteFailed}!void {
         try self.print("\x1b[{d};{d}H", .{ y + 1, x + 1 });
-        try self.flush();
+        // try self.flush();
     }
 
     pub fn saveCurrentCursorPosition(self: *Terminal) error{WriteFailed}!void {
@@ -160,6 +161,7 @@ pub const Terminal = struct {
     }
 
     pub fn getSize(self: *const Terminal) Size {
+        // @TODO windows uses GetConsoleScreenBufferInfo
         var size: std.posix.winsize = undefined;
         const r = std.posix.system.ioctl(self.fd, std.posix.T.IOCGWINSZ, @intFromPtr(&size));
         if (r != 0) {

@@ -110,7 +110,8 @@ pub fn execute(self: @This(), ctx: common.CommandContext) void {
 }
 
 const testing = std.testing;
-const TestFs = @import("../testfs/root.zig").TestFs;
+const builtin = @import("builtin");
+const TestFs = if (builtin.is_test) @import("test_fs").TestFs else void;
 
 const Init = @This();
 

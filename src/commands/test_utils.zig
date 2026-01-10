@@ -2,7 +2,8 @@ const std = @import("std");
 const testing = std.testing;
 const gila = @import("gila");
 const stdx = @import("stdx");
-const TestFs = @import("../testfs/root.zig").TestFs;
+const builtin = @import("builtin");
+const TestFs = if (builtin.is_test) @import("test_fs").TestFs else void;
 
 const Task = gila.Task;
 

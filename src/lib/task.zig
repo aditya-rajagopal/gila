@@ -20,6 +20,7 @@ waiting_on: ?[]const []const u8,
 tags: ?[]const []const u8,
 description: []const u8,
 extra_lines: ?[]const []const u8,
+memory: std.ArrayList(u8),
 
 pub const default = Task{
     .id = &.{},
@@ -34,6 +35,7 @@ pub const default = Task{
     .tags = null,
     .description = &.{},
     .extra_lines = null,
+    .memory = .empty,
 };
 
 pub fn init(id: []const u8) error{Invalid}!Task {
@@ -70,7 +72,7 @@ pub fn fromReader(
     const fields = comptime blk: {
         var out: []const std.builtin.Type.StructField = &.{};
         for (@typeInfo(Task).@"struct".fields) |field| {
-            if (std.mem.eql(u8, field.name, "extra_lines") or std.mem.eql(u8, field.name, "description") or std.mem.eql(u8, field.name, "id")) {
+            if (std.mem.eql(u8, field.name, "extra_lines") or std.mem.eql(u8, field.name, "description") or std.mem.eql(u8, field.name, "id") or std.mem.eql(u8, field.name, "memory")) {
                 continue;
             }
             out = out ++ &[_]std.builtin.Type.StructField{field};
@@ -372,7 +374,7 @@ pub fn format(self: *const Task, writer: *std.Io.Writer) std.Io.Writer.Error!voi
     try writer.print("{s}\n", .{gila.seperator});
     const fields = std.meta.fields(Task);
     inline for (fields) |field| {
-        if (comptime std.mem.eql(u8, field.name, "description") or std.mem.eql(u8, field.name, "extra_lines") or std.mem.eql(u8, field.name, "id")) {
+        if (comptime std.mem.eql(u8, field.name, "description") or std.mem.eql(u8, field.name, "extra_lines") or std.mem.eql(u8, field.name, "id") or std.mem.eql(u8, field.name, "memory")) {
             continue;
         }
         const line_prefix = field.name ++ ": ";

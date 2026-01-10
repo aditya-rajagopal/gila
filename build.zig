@@ -8,11 +8,17 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
     const stdx = b.dependency("stdx", .{ .target = target }).module("stdx");
 
+    const test_fs_mod = b.createModule(.{
+        .root_source_file = b.path("src/testfs/root.zig"),
+        .target = target,
+    });
+
     const mod = b.addModule("gila", .{
         .root_source_file = b.path("src/lib/root.zig"),
         .target = target,
         .imports = &.{
             .{ .name = "stdx", .module = stdx },
+            .{ .name = "test_fs", .module = test_fs_mod },
         },
     });
     const zon_mod = b.createModule(.{
@@ -24,6 +30,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "gila", .module = mod },
         .{ .name = "zon", .module = zon_mod },
         .{ .name = "stdx", .module = stdx },
+        .{ .name = "test_fs", .module = test_fs_mod },
     } });
 
     const exe = b.addExecutable(.{
@@ -42,6 +49,11 @@ pub fn build(b: *std.Build) void {
         run_cmd.addArgs(args);
     }
 
+    const test_fs_test = b.addTest(.{
+        .root_module = test_fs_mod,
+        .test_runner = .{ .path = b.path("src/test_runner.zig"), .mode = .simple },
+    });
+    const run_test_fs_test = b.addRunArtifact(test_fs_test);
     const mod_tests = b.addTest(.{
         .root_module = mod,
         .test_runner = .{ .path = b.path("src/test_runner.zig"), .mode = .simple },
@@ -56,6 +68,7 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
     test_step.dependOn(&run_exe_tests.step);
+    test_step.dependOn(&run_test_fs_test.step);
 
     const check_exe = b.addExecutable(.{ .name = "check", .root_module = exe_mod });
     const check_step = b.step("check", "Run ast check");

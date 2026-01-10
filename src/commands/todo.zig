@@ -155,6 +155,7 @@ pub fn run(self: Todo, ctx: common.CommandContext) !struct { task_id: []const u8
         .waiting_on = waiting_on,
         .completed = null,
         .extra_lines = null,
+        .memory = .empty,
     };
 
     var error_out: ?[]const u8 = null;
@@ -242,7 +243,7 @@ pub fn run(self: Todo, ctx: common.CommandContext) !struct { task_id: []const u8
 }
 
 const testing = std.testing;
-const TestFs = @import("../testfs/root.zig").TestFs;
+const TestFs = if (builtin.is_test) @import("test_fs").TestFs else void;
 const test_utils = @import("test_utils.zig");
 
 const initGilaProject = test_utils.initGilaProjectMinimal;

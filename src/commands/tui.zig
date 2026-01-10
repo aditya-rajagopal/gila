@@ -80,10 +80,10 @@ pub fn execute(_: Tui, ctx: common.CommandContext) void {
 
     var quit = false;
 
-    var current_x: u16 = terminal.size.width / 2;
-    var current_y: u16 = terminal.size.height / 2;
-    var player_direction_x: i8 = 0;
-    var player_direction_y: i8 = 0;
+    var screen_position: usize = 0;
+    var task_start: usize = 0;
+    var task_end: usize = 0;
+    var lines: usize = terminal.size.height - 1;
 
     var screen_buffer: []u8 = undefined;
     var render_buffer: []u8 = undefined;
@@ -98,6 +98,14 @@ pub fn execute(_: Tui, ctx: common.CommandContext) void {
 
     terminal.clearScreen() catch {};
     var redraw: bool = true;
+
+    const Find = @import("find.zig");
+    const find = Find{};
+    const result = find.run(ctx) catch {
+        log.err("Failed to run find", .{});
+        return;
+    };
+    task_end = std.math.clamp(result.tasks.len, 0, lines);
 
     while (!quit) {
         const events = terminal.pollEvents(100) catch {
@@ -126,38 +134,53 @@ pub fn execute(_: Tui, ctx: common.CommandContext) void {
         }
 
         { // Application
+            var direction: i8 = 0;
             {
                 for (events) |event| {
-                    { // @TODO this can be from some scratch buffer that is reused before blitting to the render buffer
-                        var buf: [128]u8 = undefined;
-                        const str = std.fmt.bufPrint(&buf, "Event: {f}", .{event}) catch unreachable;
-                        @memcpy(render_buffer[0..str.len], str);
-                    }
                     switch (event) {
-                        .key_pressed => |key| {
+                        .key_pressed, .key_repeat => |key| {
                             switch (key.physical_key) {
-                                .enter => {
-                                    quit = true;
-                                },
-                                .w, .up => player_direction_y -= 1,
-                                .s, .down => player_direction_y += 1,
-                                .a, .left => player_direction_x -= 1,
-                                .d, .right => player_direction_x += 1,
-                                else => {},
-                            }
-                        },
-                        .key_released => |key| {
-                            switch (key.physical_key) {
-                                .w, .up => player_direction_y += 1,
-                                .s, .down => player_direction_y -= 1,
-                                .a, .left => player_direction_x += 1,
-                                .d, .right => player_direction_x -= 1,
+                                .q => quit = true,
+                                .j, .down => direction = 1,
+                                .k, .up => direction = -1,
                                 else => {},
                             }
                         },
                         .resize => |resize| {
-                            current_x = @intFromFloat(@round(stdx.divIntToFloat(f32, (resize.width - 1) * current_x, resize.old_width - 1)));
-                            current_y = @intFromFloat(@round(stdx.divIntToFloat(f32, (resize.height - 1) * current_y, resize.old_height - 1)));
+                            const lines_before = lines;
+                            lines = resize.height - 1;
+                            if (lines_before > lines) {
+                                if (result.tasks.len < lines_before) {
+                                    const lines_empty_before = lines_before - result.tasks.len;
+                                    const lines_reduced = lines_before - lines;
+                                    if (lines_empty_before > lines_reduced) {} else {
+                                        task_end -= (lines_reduced - lines_empty_before);
+                                    }
+                                } else {
+                                    if (screen_position >= lines) {
+                                        task_end -= lines_before - 1 - screen_position;
+                                        task_start = task_end - lines;
+                                        screen_position = lines - 1;
+                                    } else {
+                                        task_end -= (lines_before - lines);
+                                    }
+                                }
+                            } else {
+                                if (result.tasks.len <= lines) {
+                                    task_start = 0;
+                                    task_end = result.tasks.len;
+                                } else {
+                                    const tasks_remaining = result.tasks.len - task_end;
+                                    const lines_added = lines - lines_before;
+                                    if (tasks_remaining < lines_added) {
+                                        task_end += tasks_remaining;
+                                        task_start -= lines_added - tasks_remaining;
+                                        screen_position += lines_added - tasks_remaining;
+                                    } else {
+                                        task_end += lines_added;
+                                    }
+                                }
+                            }
                         },
                         else => {},
                     }
@@ -165,24 +188,50 @@ pub fn execute(_: Tui, ctx: common.CommandContext) void {
             }
 
             {
-                {
-                    var buf: [128]u8 = undefined;
-                    const str = std.fmt.bufPrint(&buf, "Position: {d}, {d}[{d} x {d}]", .{ current_x, current_y, terminal.size.width, terminal.size.height }) catch unreachable;
-                    terminal.setCursorPosition(0, 1) catch {};
-                    terminal.write(str) catch {};
-                }
-                if (player_direction_x > 0) {
-                    if (current_x < terminal.size.width - 1) current_x += 1 else current_x = 0;
-                } else if (player_direction_x < 0) {
-                    if (current_x > 0) current_x -= 1 else current_x = terminal.size.width - 1;
+                if (direction == -1) {
+                    if (screen_position == 0) {
+                        if (task_start == 0) {
+                            if (result.tasks.len > lines) {
+                                task_end = result.tasks.len;
+                                task_start = result.tasks.len - lines;
+                                screen_position = lines - 1;
+                            } else {
+                                screen_position = result.tasks.len;
+                            }
+                        } else {
+                            task_start -= 1;
+                            task_end -= 1;
+                        }
+                    } else {
+                        screen_position -= 1;
+                    }
                 }
 
-                if (player_direction_y > 0) {
-                    if (current_y < terminal.size.height - 1) current_y += 1 else current_y = 0;
-                } else if (player_direction_y < 0) {
-                    if (current_y > 0) current_y -= 1 else current_y = terminal.size.height - 1;
+                if (direction == 1) {
+                    if (screen_position == lines - 1) {
+                        if (task_end == result.tasks.len) {
+                            task_end = lines;
+                            task_start = 0;
+                            screen_position = 0;
+                        } else {
+                            task_start += 1;
+                            task_end += 1;
+                        }
+                    } else if (screen_position == result.tasks.len) {
+                        screen_position = 0;
+                    } else {
+                        screen_position += 1;
+                    }
                 }
-                render_buffer[current_y * terminal.size.width + current_x] = 'X';
+
+                const search_str = "Search: ";
+                @memcpy(render_buffer[0..search_str.len], search_str);
+                for (result.tasks[task_start..task_end], 0..) |task, index| {
+                    var buf: [128]u8 = undefined;
+                    const str = std.fmt.bufPrint(&buf, "{s}{s}", .{ if (screen_position == index) ">" else " ", task.path }) catch unreachable;
+                    const dest = render_buffer[(index + 1) * terminal.size.width ..][0..str.len];
+                    @memcpy(dest, str);
+                }
             }
         }
 

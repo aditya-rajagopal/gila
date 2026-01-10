@@ -90,7 +90,6 @@ pub fn run(self: Sync, ctx: common.CommandContext) !struct { []Transition, []Upd
     _ = self;
     const io = ctx.io;
     const arena = ctx.arena;
-    // @TODO [[massive_raid_664]]
     const allocator = arena.allocator();
 
     _, var gila_dir = common.getGilaDir(io, allocator) orelse return Error.GilaNotFound;
@@ -100,13 +99,16 @@ pub fn run(self: Sync, ctx: common.CommandContext) !struct { []Transition, []Upd
     var local_arena = stdx.Arena.initBuffer(fixed_buffer);
 
     var maps: TaskSets = .empty;
-    var transitions: Transitions = .empty;
-    var updates: Updates = .empty;
+    var transitions = Transitions.initCapacity(allocator, 256) catch unreachable;
+    var updates = Updates.initCapacity(allocator, 256) catch unreachable;
 
+    // @TODO GILA(polite_loop_frr) Concurancy when doing find and sync
+    // Then we can do a single pass over the tasks and figure out which ones are in the wrong state. And only process those
     inline for (@typeInfo(TaskSets).@"struct".fields) |field| {
         var dir_n: ?std.Io.Dir = gila_dir.openDir(io, field.name, .{ .iterate = true }) catch null;
         if (dir_n) |*dir| {
-            var map = TaskSet.init(allocator, &.{}, &.{}) catch unreachable;
+            var map = try TaskSet.init(allocator, &.{}, &.{});
+            try map.ensureTotalCapacity(allocator, 256);
             defer dir.close(io);
             var dir_walker = dir.iterateAssumeFirstIteration();
             while (dir_walker.next(io) catch |err| {
@@ -128,7 +130,7 @@ pub fn run(self: Sync, ctx: common.CommandContext) !struct { []Transition, []Upd
             @field(maps, field.name) = map;
         }
     }
-
+    // var start = std.time.Timer.start() catch unreachable;
     if (maps.done) |*done_map| {
         try parseFolder(io, gila_dir, gila.Status.done, &local_arena, &maps, done_map, arena, &transitions);
     }
@@ -144,6 +146,8 @@ pub fn run(self: Sync, ctx: common.CommandContext) !struct { []Transition, []Upd
     if (maps.cancelled) |*cancelled_map| {
         try parseFolder(io, gila_dir, gila.Status.cancelled, &local_arena, &maps, cancelled_map, arena, &transitions);
     }
+    // log.err("Total {d}us", .{@as(f32, @floatFromInt(start.read())) / std.time.ns_per_us});
+    // log.err("Probe: count {d} total {d}us", .{ probe.count, @as(f32, @floatFromInt(probe.total)) / std.time.ns_per_us });
 
     if (maps.waiting) |*waiting_map| {
         var dir: std.Io.Dir = gila_dir.openDir(io, "waiting", .{}) catch {
@@ -269,6 +273,11 @@ pub fn run(self: Sync, ctx: common.CommandContext) !struct { []Transition, []Upd
     return .{ try transitions.toOwnedSlice(arena.allocator()), try updates.toOwnedSlice(arena.allocator()) };
 }
 
+// var probe: struct {
+//     total: usize = 0,
+//     count: usize = 0,
+// } = .{};
+
 fn parseFolder(
     io: std.Io,
     gila_dir: std.Io.Dir,
@@ -294,11 +303,14 @@ fn parseFolder(
         @memcpy(file_name[task_name.len..][0..3], ".md");
         const path = try std.fs.path.join(local_arena.allocator(), &.{ task_name, file_name });
 
+        // var start = std.time.Timer.start() catch unreachable;
         const file = dir.openFile(io, path, .{}) catch |err| {
             log.err("Unexpected error while opening task file {s}: {s}", .{ task_name, @errorName(err) });
             index += 1;
             continue;
         };
+        // probe.total += start.read();
+        // probe.count += 1;
 
         var task = gila.Task.init(task_name) catch unreachable;
         task.fromFile(file, io, local_arena) catch {

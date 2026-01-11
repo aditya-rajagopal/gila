@@ -14,6 +14,7 @@ const Todo = @This();
 
 priority: gila.Priority = .medium,
 priority_value: u8 = 50,
+owner: ?[]const u8 = null,
 description: ?[]const u8 = null,
 tags: ?common.Tags = null,
 waiting_on: ?common.TaskList = null,
@@ -27,7 +28,7 @@ positional: struct {
 pub const help = gila.logo ++
     \\Usage:
     \\
-    \\    gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>]
+    \\    gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>] [--owner=<string>]
     \\              [--description=<description>] [--tags="<tag1>,<tag2>,..."]
     \\              [--waiting-on="<task1>,<task2>,..."] [--blocks="<task1>,<task2>,..."]
     \\              [--verbose] [--edit] <title>
@@ -44,7 +45,10 @@ pub const help = gila.logo ++
     \\    --priority-value=<value>
     \\        The priority value of the task. Can be an integer between 0 to 255. Defaults to 50.
     \\
-    \\    --description=<description>
+    \\    --owner=<string>
+    \\        The username for the owner of the task
+    \\
+    \\    --description=<string>
     \\        The description of the task.
     \\
     \\    --tags="<tag1>,<tag2>,..."
@@ -105,7 +109,7 @@ pub fn run(self: Todo, ctx: common.CommandContext) !struct { task_id: []const u8
     };
     log.debug("Generated task_id: {s}", .{task_name});
 
-    const user_name = ctx.username;
+    const user_name = if (self.owner) |owner| owner else ctx.username;
     const creation_dt = stdx.DateTimeUTC.now();
 
     const waiting_on: ?[]const []const u8 = if (self.waiting_on) |waiting_on| blk: {
@@ -231,12 +235,18 @@ pub fn run(self: Todo, ctx: common.CommandContext) !struct { task_id: []const u8
         const editor_name = ctx.editor;
 
         const file_name = try std.fs.path.join(allocator, &.{ gila_path, description_file });
-        var result = std.process.run(std.heap.page_allocator, io, .{ .argv = &.{ editor_name, "+", file_name } }) catch |err| {
+
+        var child = std.process.spawn(io, .{ .argv = &.{ editor_name, "+", file_name } }) catch |err| {
             log.err("Failed to open editor: {s}", .{@errorName(err)});
             return Error.FailedToOpenEditor;
         };
+        const result = child.wait(io) catch |err| {
+            log.err("Failed to wait for editor: {s}", .{@errorName(err)});
+            return Error.FailedToOpenEditor;
+        };
+
         log.debug("Opened editor {s} at {f}", .{ editor_name, stdx.DateTimeUTC.now() });
-        log.debug("Editor exited with code {any} at {f}", .{ result.term, stdx.DateTimeUTC.now() });
+        log.debug("Editor exited with code {any} at {f}", .{ result, stdx.DateTimeUTC.now() });
     }
 
     return .{ .task_id = task.id, .description_file = description_file, .status = task.status };

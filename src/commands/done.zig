@@ -115,11 +115,17 @@ pub fn execute(self: Done, ctx: common.CommandContext) void {
         // @TODO make the default editor configurable
         const editor_name = ctx.editor;
 
-        const res = std.process.run(std.heap.page_allocator, io, .{ .argv = &.{ editor_name, "+", file_name } }) catch |err| {
+        var child = std.process.spawn(io, .{ .argv = &.{ editor_name, "+", file_name } }) catch |err| {
             log.err("Failed to open editor: {s}", .{@errorName(err)});
             return;
         };
-        log.debug("Editor exited with code {any} at {f}", .{ res.term, stdx.DateTimeUTC.now() });
+        const res = child.wait(io) catch |err| {
+            log.err("Failed to wait for editor: {s}", .{@errorName(err)});
+            return;
+        };
+
+        log.debug("Opened editor {s} at {f}", .{ editor_name, stdx.DateTimeUTC.now() });
+        log.debug("Editor exited with code {any} at {f}", .{ res, stdx.DateTimeUTC.now() });
     }
 }
 

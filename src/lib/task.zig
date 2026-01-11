@@ -497,13 +497,13 @@ pub fn validate(self: *const Task, error_out: *?[]const u8) ValidateError!void {
         return error.Invalid;
     }
 
-    if (!titleIsValid(self.title)) {
+    if (!stringIsValid(self.title)) {
         error_out.* = "Task title is invalid. Empty or contains \\r or \\n";
         return error.Invalid;
     }
 
-    if (self.owner.len == 0) {
-        error_out.* = "Task owner cannot be empty";
+    if (!stringIsValid(self.owner)) {
+        error_out.* = "Task owner cannot be empty or contain \\r or \\n";
         return error.Invalid;
     }
 
@@ -579,9 +579,9 @@ pub fn validate(self: *const Task, error_out: *?[]const u8) ValidateError!void {
     }
 }
 
-fn titleIsValid(title: []const u8) bool {
+fn stringIsValid(title: []const u8) bool {
     if (title.len == 0) {
-        log.err("Title cannot be empty", .{});
+        log.err("String cannot be empty", .{});
         return false;
     }
     const invalids: []const u8 = "\r\n";
@@ -593,7 +593,7 @@ fn titleIsValid(title: []const u8) bool {
 
     if (invalid_char) |index| {
         const invalids_escaped: []const u8 = "\\r\\n";
-        log.err("Title cannot contain any of '{s}'. Found one at index {d}", .{ invalids_escaped, index });
+        log.err("String cannot contain any of '{s}'. Found one at index {d}", .{ invalids_escaped, index });
         return false;
     }
     return true;

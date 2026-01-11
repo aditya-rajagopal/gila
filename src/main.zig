@@ -132,13 +132,23 @@ pub fn main(env: std.process.Init.Minimal) void {
     var stack_space: [512 * 1024]u8 = undefined;
     var arena = stdx.Arena.initBuffer(&stack_space);
 
+    const gila_user_name = "GILA_USER";
     const user_env = if (builtin.os.tag == .windows) "USERNAME" else "USER";
     const editr = "EDITOR";
 
-    const username = env.environ.getAlloc(arena.allocator(), user_env) catch unreachable;
+    const username = env.environ.getAlloc(arena.allocator(), gila_user_name) catch env.environ.getAlloc(arena.allocator(), user_env) catch unreachable;
     const editor = env.environ.getAlloc(arena.allocator(), editr) catch "vim";
 
-    var threaded = std.Io.Threaded.init_single_threaded;
+    const thread_buffer: []u8 = std.heap.page_allocator.alloc(u8, 1 * 1024 * 1024) catch {
+        std.log.err("Failed to allocate thread buffer", .{});
+        return;
+    };
+    var thread_allocator = std.heap.FixedBufferAllocator.init(thread_buffer);
+
+    var threaded = std.Io.Threaded.init(thread_allocator.allocator(), .{
+        .environ = env.environ,
+    });
+    threaded.allocator = std.heap.page_allocator;
     const io = threaded.ioBasic();
 
     const context = common.CommandContext{

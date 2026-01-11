@@ -12,7 +12,6 @@ const Todo = @import("commands/todo.zig");
 const Init = @import("commands/init.zig");
 const Done = @import("commands/done.zig");
 const Sync = @import("commands/sync.zig");
-const Tui = @import("commands/tui.zig");
 const Find = @import("commands/find.zig");
 const Server = @import("commands/server.zig");
 
@@ -74,7 +73,6 @@ const CLIArgs = union(enum) {
     todo: Todo,
     done: Done,
     sync: Sync,
-    tui: Tui,
     find: Find,
     server: Server,
     version,
@@ -161,7 +159,6 @@ pub fn main(env: std.process.Init.Minimal) void {
         .todo => |todo| todo.execute(context),
         .done => |done| done.execute(context),
         .sync => |sync| sync.execute(context),
-        .tui => |tui| tui.execute(context),
         .find => |find| find.execute(context),
         .server => |server| server.execute(context),
         .version => {

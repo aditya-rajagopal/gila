@@ -108,7 +108,7 @@ pub fn execute(_: Tui, ctx: common.CommandContext) void {
     task_end = std.math.clamp(result.tasks.len, 0, lines);
 
     while (!quit) {
-        const events = terminal.pollEvents(100) catch {
+        const events = terminal.pollEvents(5) catch {
             log.err("Failed to poll events", .{});
             return;
         };
@@ -145,6 +145,12 @@ pub fn execute(_: Tui, ctx: common.CommandContext) void {
                                 .k, .up => direction = -1,
                                 else => {},
                             }
+                        },
+                        .mouse_scroll_up => {
+                            direction = 1;
+                        },
+                        .mouse_scroll_down => {
+                            direction = -1;
                         },
                         .resize => |resize| {
                             const lines_before = lines;

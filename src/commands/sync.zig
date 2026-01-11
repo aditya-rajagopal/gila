@@ -15,7 +15,7 @@ const Sync = @This();
 
 verbose: bool = false,
 
-pub const help =
+pub const help = gila.logo ++
     \\Usage:
     \\
     \\    gila sync [-h | --help] [--verbose]

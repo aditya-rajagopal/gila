@@ -77,7 +77,9 @@ const CLIArgs = union(enum) {
     server: Server,
     version,
 
-    pub const help =
+    pub const help = gila.logo ++ help_text;
+
+    const help_text =
         \\Usage:
         \\
         \\    gila [-h | --help]
@@ -86,10 +88,10 @@ const CLIArgs = union(enum) {
         \\
         \\    gila init [-h | --help] [--bare] [<directory>]
         \\
-        \\    gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>] 
-        \\              [--description=<description>] [--tags="<tag1>,<tag2>,..."] 
-        \\              [--waiting-on="<task1>,<task2>,..."] [--verbose]
-        \\              [--edit] <title>
+        \\    gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>]
+        \\              [--description=<description>] [--tags="<tag1>,<tag2>,..."]
+        \\              [--waiting-on="<task1>,<task2>,..."] [--blocks="<task1>,<task2>,..."]
+        \\              [--verbose] [--edit] <title>
         \\
         \\    gila done [-h | --help] [--verbose] [--edit] <task_id>
         \\

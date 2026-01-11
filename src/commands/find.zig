@@ -67,7 +67,7 @@ waiting_on: ?struct {
 } = null,
 verbose: bool = false,
 
-pub const help =
+pub const help = gila.logo ++
     \\Usage:
     \\
     \\    gila find [--priority=low|medium|high|urgent] [--tags="<[or|and]:><tag1>,<tag2>,..."]

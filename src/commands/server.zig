@@ -14,7 +14,7 @@ const Server = @This();
 
 run_once: bool = false,
 
-pub const help =
+pub const help = gila.logo ++
     \\Usage:
     \\    gila server [-h | --help] [--run-once]
     \\

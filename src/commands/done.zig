@@ -18,7 +18,7 @@ positional: struct {
     task: []const u8,
 },
 
-pub const help =
+pub const help = gila.logo ++
     \\Usage:
     \\
     \\    gila done [-h | --help] [--verbose] [--edit] <task_id>

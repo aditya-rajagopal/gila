@@ -24,7 +24,7 @@ positional: struct {
     title: []const u8,
 },
 
-pub const help =
+pub const help = gila.logo ++
     \\Usage:
     \\
     \\    gila todo [--priority=low|medium|high|urgent] [--priority-value=<integer value>]

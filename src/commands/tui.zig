@@ -63,6 +63,15 @@ pub const Scissor = struct {
 // It is given the screen buffer and a render buffer to write to.
 // Should we be command based or should we do things immediately?
 
+var global_tty: ?*Terminal = null;
+
+pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
+    if (global_tty) |tty| {
+        tty.deinit();
+    }
+    std.debug.defaultPanic(msg, ret_addr);
+}
+
 pub fn execute(_: Tui, ctx: common.CommandContext) void {
     const io = ctx.io;
 
@@ -74,6 +83,7 @@ pub fn execute(_: Tui, ctx: common.CommandContext) void {
         return;
     };
     defer terminal.deinit();
+    global_tty = &terminal;
 
     terminal.setCursorVisible(false) catch {};
     defer terminal.setCursorVisible(true) catch {};

@@ -12,59 +12,13 @@ const common = @import("common.zig");
 
 const Find = @This();
 
-pub const Op = enum { @"and", @"or" };
-
-priority: ?gila.Priority = null,
-tags: ?struct {
-    op: Op,
-    tag_list: common.Tags,
-
-    pub fn parseFlagValue(gpa: std.mem.Allocator, flag_value: []const u8, error_out: *?[]const u8) error{Invalid}!@This() {
-        if (flag_value.len == 0) {
-            error_out.* = "Empty flag value";
-            return error.Invalid;
-        }
-        const op_pos = std.mem.findScalar(u8, flag_value, ':');
-        var data: []const u8 = flag_value;
-        var result: @This() = undefined;
-        if (op_pos) |pos| {
-            result.op = std.meta.stringToEnum(Op, flag_value[0..pos]) orelse {
-                error_out.* = "Invalid op provided in flag value. Must be one of 'and' or 'or'";
-                return error.Invalid;
-            };
-            data = flag_value[pos + 1 ..];
-        } else {
-            result.op = .@"or";
-        }
-        result.tag_list = common.Tags.parseFlagValue(gpa, data, error_out) catch return error.Invalid;
-        return result;
-    }
-} = null,
-waiting_on: ?struct {
-    op: Op,
-    task_list: common.TaskList,
-
-    pub fn parseFlagValue(gpa: std.mem.Allocator, flag_value: []const u8, error_out: *?[]const u8) error{Invalid}!@This() {
-        if (flag_value.len == 0) {
-            error_out.* = "Empty flag value";
-            return error.Invalid;
-        }
-        const op_pos = std.mem.findScalar(u8, flag_value, ':');
-        var data: []const u8 = flag_value;
-        var result: @This() = undefined;
-        if (op_pos) |pos| {
-            result.op = std.meta.stringToEnum(Op, flag_value[0..pos]) orelse {
-                error_out.* = "Invalid op provided in flag value. Must be one of 'and' or 'or'";
-                return error.Invalid;
-            };
-            data = flag_value[pos + 1 ..];
-        } else {
-            result.op = .@"or";
-        }
-        result.task_list = common.TaskList.parseFlagValue(gpa, data, error_out) catch return error.Invalid;
-        return result;
-    }
-} = null,
+// @TODO GILA(swift_base_f2p)
+status: ?gila.Status = null,
+owner: ?common.StringList = null,
+priority: ?common.PriorityFilter = null,
+priority_value: ?common.PriorityValueFilter = null,
+tags: ?common.TagsFilter = null,
+waiting_on: ?common.WaitingOnFilter = null,
 verbose: bool = false,
 
 pub const help = gila.logo ++
@@ -155,29 +109,36 @@ pub fn run(self: Find, ctx: common.CommandContext) Error!struct { tasks: []Entry
     var tasks = try TaskList.initCapacity(arena.allocator(), 1024);
 
     inline for (std.meta.fieldNames(gila.Status)) |field| {
-        var dir_n: ?std.Io.Dir = gila_dir.openDir(io, field, .{ .iterate = true }) catch null;
-        if (dir_n) |*dir| {
-            var dir_walker = dir.iterateAssumeFirstIteration();
-            while (dir_walker.next(io) catch |err| {
-                log.err("Failed to iterate over done directory: {s}", .{@errorName(err)});
-                return Error.DirIterationFailed;
-            }) |entry| {
-                defer local_arena.reset(false);
-                if (entry.kind == .directory) {
-                    if (gila.id.isValid(entry.name)) {
-                        var buffer: [1024]u8 = undefined;
-                        const file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{entry.name}) catch unreachable;
-                        const path = try std.fs.path.join(local_arena.allocator(), &.{ entry.name, file_name });
-                        const file = dir.openFile(io, path, .{}) catch continue;
-                        defer file.close(io);
+        escape: {
+            if (self.status) |status| {
+                if (std.meta.stringToEnum(gila.Status, field) != status) {
+                    break :escape;
+                }
+            }
+            var dir_n: ?std.Io.Dir = gila_dir.openDir(io, field, .{ .iterate = true }) catch null;
+            if (dir_n) |*dir| {
+                var dir_walker = dir.iterateAssumeFirstIteration();
+                while (dir_walker.next(io) catch |err| {
+                    log.err("Failed to iterate over done directory: {s}", .{@errorName(err)});
+                    return Error.DirIterationFailed;
+                }) |entry| {
+                    defer local_arena.reset(false);
+                    if (entry.kind == .directory) {
+                        if (gila.id.isValid(entry.name)) {
+                            var buffer: [1024]u8 = undefined;
+                            const file_name = std.fmt.bufPrint(&buffer, "{s}.md", .{entry.name}) catch unreachable;
+                            const path = try std.fs.path.join(local_arena.allocator(), &.{ entry.name, file_name });
+                            const file = dir.openFile(io, path, .{}) catch continue;
+                            defer file.close(io);
 
-                        const folder = std.meta.stringToEnum(gila.Status, field) orelse unreachable;
-                        const task = parseTask(&local_arena, entry.name, file_name, io, folder, gila_dir, file) catch continue;
+                            const folder = std.meta.stringToEnum(gila.Status, field) orelse unreachable;
+                            const task = parseTask(&local_arena, entry.name, file_name, io, folder, gila_dir, file) catch continue;
 
-                        if (task) |t| {
-                            if (self.testTask(t)) {
-                                const full_path = std.fs.path.join(arena.allocator(), &.{ field, path }) catch unreachable;
-                                try tasks.append(arena.allocator(), .{ .path = full_path, .status = folder });
+                            if (task) |t| {
+                                if (self.testTask(t)) {
+                                    const full_path = std.fs.path.join(arena.allocator(), &.{ field, path }) catch unreachable;
+                                    try tasks.append(arena.allocator(), .{ .path = full_path, .status = folder });
+                                }
                             }
                         }
                     }
@@ -189,17 +150,46 @@ pub fn run(self: Find, ctx: common.CommandContext) Error!struct { tasks: []Entry
     return .{ .tasks = try tasks.toOwnedSlice(arena.allocator()), .gila_path = gila_path };
 }
 
+fn noFilter(self: Find) bool {
+    return self.priority == null and
+        self.priority_value == null and
+        self.tags == null and
+        self.waiting_on == null and
+        self.owner == null;
+}
+
 const find = common.findString;
 pub fn testTask(self: Find, task: gila.Task) bool {
-    if (self.priority == null and self.tags == null and self.waiting_on == null) return true;
-    if (self.priority) |priority| {
-        if (priority == task.priority) return true;
+    if (self.noFilter()) {
+        return true;
     }
+    if (self.priority) |priority| {
+        const condition = switch (priority.direction) {
+            .lt => @intFromEnum(task.priority) < @intFromEnum(priority.value),
+            .gt => @intFromEnum(task.priority) > @intFromEnum(priority.value),
+            .eq => @intFromEnum(task.priority) == @intFromEnum(priority.value),
+            .lte => @intFromEnum(task.priority) <= @intFromEnum(priority.value),
+            .gte => @intFromEnum(task.priority) >= @intFromEnum(priority.value),
+        };
+        if (condition) return true;
+    }
+
+    if (self.priority_value) |priority_value| {
+        const condition = switch (priority_value.direction) {
+            .lt => task.priority_value < priority_value.value,
+            .gt => task.priority_value > priority_value.value,
+            .eq => task.priority_value == priority_value.value,
+            .lte => task.priority_value <= priority_value.value,
+            .gte => task.priority_value >= priority_value.value,
+        };
+        if (condition) return true;
+    }
+
     if (self.tags) |tags| fail: {
         switch (tags.op) {
             .@"and" => {
                 if (task.tags) |task_tags| {
-                    for (tags.tag_list.tags) |tag| {
+                    for (tags.tag_list.strings) |tag| {
                         if (!find(task_tags, tag)) break :fail;
                     }
                 } else break :fail;
@@ -207,7 +197,7 @@ pub fn testTask(self: Find, task: gila.Task) bool {
             },
             .@"or" => {
                 if (task.tags) |task_tags| {
-                    for (tags.tag_list.tags) |tag| {
+                    for (tags.tag_list.strings) |tag| {
                         if (find(task_tags, tag)) return true;
                     }
                 } else break :fail;
@@ -339,7 +329,7 @@ test "by priority" {
     try createTaskFile(fs, "todo", "low_pri_abc", "Low Priority", "low", "", "Low priority task\n");
 
     const cmd: Find = .{
-        .priority = .high,
+        .priority = .{ .direction = .eq, .value = .high },
         .tags = null,
         .waiting_on = null,
         .verbose = false,
@@ -359,6 +349,20 @@ test "by priority" {
     const stdout = fs.getStdout();
     try testing.expect(std.mem.indexOf(u8, stdout, "high_pri_abc") != null);
     try testing.expect(std.mem.indexOf(u8, stdout, "low_pri_abc") == null);
+    fs.clearStdout();
+
+    const cmd2: Find = .{
+        .priority = .{ .direction = .lt, .value = .high },
+        .tags = null,
+        .waiting_on = null,
+        .verbose = false,
+    };
+    arena.reset(false);
+    cmd2.execute(context);
+
+    const stdout2 = fs.getStdout();
+    try testing.expect(std.mem.indexOf(u8, stdout2, "high_pri_abc") == null);
+    try testing.expect(std.mem.indexOf(u8, stdout2, "low_pri_abc") != null);
 }
 
 test "by tags with or" {
@@ -423,7 +427,7 @@ test "by tags with or" {
         .priority = null,
         .tags = .{
             .op = .@"or",
-            .tag_list = .{ .tags = &tags_storage },
+            .tag_list = .{ .strings = &tags_storage },
         },
         .waiting_on = null,
         .verbose = false,
@@ -493,7 +497,7 @@ test "by tags with and" {
         .priority = null,
         .tags = .{
             .op = .@"and",
-            .tag_list = .{ .tags = &tags_storage },
+            .tag_list = .{ .strings = &tags_storage },
         },
         .waiting_on = null,
         .verbose = false,
@@ -524,7 +528,7 @@ test "no matches" {
     try createTaskFile(fs, "todo", "low_only_abc", "Low Task", "low", "", "Low priority only\n");
 
     const cmd: Find = .{
-        .priority = .urgent,
+        .priority = .{ .direction = .eq, .value = .urgent },
         .tags = null,
         .waiting_on = null,
         .verbose = false,

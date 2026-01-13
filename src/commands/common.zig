@@ -135,8 +135,8 @@ pub const TaskList = struct {
     }
 };
 
-pub const Tags = struct {
-    tags: []const []const u8,
+pub const StringList = struct {
+    strings: []const []const u8,
 
     pub fn parseFlagValue(gpa: std.mem.Allocator, flag_value: []const u8, error_out: *?[]const u8) error{Invalid}!@This() {
         if (flag_value.len == 0) {
@@ -149,24 +149,135 @@ pub const Tags = struct {
             error_out.* = "Tag list cannot contain any of '" ++ illegal_characters ++ "'";
             return error.Invalid;
         }
-        const tag_count: usize = std.mem.countScalar(u8, flag_value, ',');
-        var tags = std.mem.splitScalar(u8, flag_value, ',');
-        const tag_list = gpa.alloc([]const u8, tag_count + 1) catch {
+        const string_count: usize = std.mem.countScalar(u8, flag_value, ',');
+        var strings = std.mem.splitScalar(u8, flag_value, ',');
+        const string_list = gpa.alloc([]const u8, string_count + 1) catch {
             error_out.* = "Failed to allocate tag list";
             return error.Invalid;
         };
-        errdefer gpa.free(tag_list);
+        errdefer gpa.free(string_list);
 
-        for (0..tag_count + 1) |index| {
-            const tag = tags.next().?;
-            if (tag.len == 0) {
+        for (0..string_count + 1) |index| {
+            const string = strings.next().?;
+            if (string.len == 0) {
                 error_out.* = "Empty tag in list";
                 return error.Invalid;
             }
-            tag_list[index] = tag;
+            string_list[index] = string;
         }
         return .{
-            .tags = tag_list,
+            .strings = string_list,
         };
+    }
+};
+
+pub const Op = enum { @"and", @"or" };
+
+pub const TagsFilter = struct {
+    op: Op,
+    tag_list: StringList,
+
+    pub fn parseFlagValue(gpa: std.mem.Allocator, flag_value: []const u8, error_out: *?[]const u8) error{Invalid}!@This() {
+        if (flag_value.len == 0) {
+            error_out.* = "Empty flag value";
+            return error.Invalid;
+        }
+        const op_pos = std.mem.findScalar(u8, flag_value, ':');
+        var data: []const u8 = flag_value;
+        var result: @This() = undefined;
+        if (op_pos) |pos| {
+            result.op = std.meta.stringToEnum(Op, flag_value[0..pos]) orelse {
+                error_out.* = "Invalid op provided in flag value. Must be one of 'and' or 'or'";
+                return error.Invalid;
+            };
+            data = flag_value[pos + 1 ..];
+        } else {
+            result.op = .@"or";
+        }
+        result.tag_list = StringList.parseFlagValue(gpa, data, error_out) catch return error.Invalid;
+        return result;
+    }
+};
+
+pub const WaitingOnFilter = struct {
+    op: Op,
+    task_list: TaskList,
+
+    pub fn parseFlagValue(gpa: std.mem.Allocator, flag_value: []const u8, error_out: *?[]const u8) error{Invalid}!@This() {
+        if (flag_value.len == 0) {
+            error_out.* = "Empty flag value";
+            return error.Invalid;
+        }
+        const op_pos = std.mem.findScalar(u8, flag_value, ':');
+        var data: []const u8 = flag_value;
+        var result: @This() = undefined;
+        if (op_pos) |pos| {
+            result.op = std.meta.stringToEnum(Op, flag_value[0..pos]) orelse {
+                error_out.* = "Invalid op provided in flag value. Must be one of 'and' or 'or'";
+                return error.Invalid;
+            };
+            data = flag_value[pos + 1 ..];
+        } else {
+            result.op = .@"or";
+        }
+        result.task_list = TaskList.parseFlagValue(gpa, data, error_out) catch return error.Invalid;
+        return result;
+    }
+};
+
+pub const Direction = enum { lt, gt, eq, lte, gte };
+pub const PriorityValueFilter = struct {
+    direction: Direction = .gt,
+    value: u8 = 0,
+
+    pub fn parseFlagValue(gpa: std.mem.Allocator, flag_value: []const u8, error_out: *?[]const u8) error{Invalid}!@This() {
+        _ = gpa;
+        if (flag_value.len == 0) {
+            error_out.* = "Empty flag value";
+            return error.Invalid;
+        }
+        const op_pos = std.mem.findScalar(u8, flag_value, ':');
+        var data: []const u8 = flag_value;
+        var result: @This() = .{};
+        if (op_pos) |pos| {
+            result.direction = std.meta.stringToEnum(Direction, flag_value[0..pos]) orelse {
+                error_out.* = "Invalid direction provided in flag value. Must be one of [lt, gt, eq, lte, gte]";
+                return error.Invalid;
+            };
+            data = flag_value[pos + 1 ..];
+        }
+        result.value = std.fmt.parseInt(u8, data, 10) catch {
+            error_out.* = "Invalid value provided in flag value. Must be a number and <= 255";
+            return error.Invalid;
+        };
+        return result;
+    }
+};
+
+pub const PriorityFilter = struct {
+    direction: Direction = .gt,
+    value: gila.Priority = .low,
+
+    pub fn parseFlagValue(gpa: std.mem.Allocator, flag_value: []const u8, error_out: *?[]const u8) error{Invalid}!@This() {
+        _ = gpa;
+        if (flag_value.len == 0) {
+            error_out.* = "Empty flag value";
+            return error.Invalid;
+        }
+        const op_pos = std.mem.findScalar(u8, flag_value, ':');
+        var data: []const u8 = flag_value;
+        var result: @This() = .{};
+        if (op_pos) |pos| {
+            result.direction = std.meta.stringToEnum(Direction, flag_value[0..pos]) orelse {
+                error_out.* = "Invalid direction provided in flag value. Must be one of [lt, gt, eq, lte, gte]";
+                return error.Invalid;
+            };
+            data = flag_value[pos + 1 ..];
+        }
+        result.value = std.meta.stringToEnum(gila.Priority, data) orelse {
+            error_out.* = "Invalid value provided in flag value. Must be one of [low, medium, high, urgent]";
+            return error.Invalid;
+        };
+        return result;
     }
 };

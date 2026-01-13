@@ -26,55 +26,11 @@ pub const Status = enum(u8) {
     };
 };
 
-/// @DEPRECATED
-pub const TaskId = struct {
-    date_time: stdx.DateTimeUTC,
-    user_name: []const u8,
-
-    pub fn new(gpa: std.mem.Allocator) std.process.GetEnvVarOwnedError!TaskId {
-        var result: TaskId = undefined;
-        result.date_time = stdx.DateTimeUTC.now();
-        const user_env = if (builtin.os.tag == .windows) "USERNAME" else "USER";
-        result.user_name = try std.process.getEnvVarOwned(gpa, user_env);
-        return result;
-    }
-
-    pub fn fromString(str: []const u8) error{InvalidTaskId}!TaskId {
-        var result: TaskId = undefined;
-        // @NOTE string for taskId must start with YYYYMMDD_HHMMSS_ followed by username
-        if (str.len < 17) {
-            log.err("Invalid task_id `{s}` a task is of the form YYYYMMDD_HHMMSS_username", .{str});
-            return error.InvalidTaskId;
-        }
-        result.date_time = stdx.DateTimeUTC.fromString(str[0..15], .YYYYMMDD_HHMMSS) catch |err| {
-            log.err("Failed to parse date_time `{s}` from task_id `{s}`: {s}", .{ str[0..15], str, @errorName(err) });
-            return error.InvalidTaskId;
-        };
-        if (str[15] != '_') {
-            log.err("Invalid task_id `{s}` a task is of the form YYYYMMDD_HHMMSS_username", .{str});
-            return error.InvalidTaskId;
-        }
-        result.user_name = str[16..];
-        return result;
-    }
-
-    pub fn isValidFormat(str: []const u8) bool {
-        if (str.len < 17) return false;
-        if (str[15] != '_') return false;
-        _ = stdx.DateTimeUTC.fromString(str[0..15], .YYYYMMDD_HHMMSS) catch return false;
-        return true;
-    }
-
-    pub fn format(self: TaskId, writer: *std.Io.Writer) !void {
-        try writer.print("{f}_{s}", .{ self.date_time.as(.YYYYMMDD_HHMMSS), self.user_name });
-    }
-};
-
-pub const Priority = enum {
-    low,
-    medium,
-    high,
-    urgent,
+pub const Priority = enum(u8) {
+    low = 0,
+    medium = 1,
+    high = 2,
+    urgent = 3,
 };
 
 pub const description_header_template =

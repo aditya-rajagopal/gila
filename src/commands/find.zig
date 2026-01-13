@@ -14,7 +14,7 @@ const Find = @This();
 
 // @TODO GILA(swift_base_f2p)
 status: ?gila.Status = null,
-owner: ?common.StringList = null,
+owners: ?common.StringList = null,
 priority: ?common.PriorityFilter = null,
 priority_value: ?common.PriorityValueFilter = null,
 tags: ?common.TagsFilter = null,
@@ -155,13 +155,16 @@ fn noFilter(self: Find) bool {
         self.priority_value == null and
         self.tags == null and
         self.waiting_on == null and
-        self.owner == null;
+        self.owners == null;
 }
 
 const find = common.findString;
 pub fn testTask(self: Find, task: gila.Task) bool {
     if (self.noFilter()) {
         return true;
+    }
+    if (self.owners) |owners| {
+        if (!find(owners.strings, task.owner)) return false;
     }
     if (self.priority) |priority| {
         const condition = switch (priority.direction) {
@@ -171,7 +174,7 @@ pub fn testTask(self: Find, task: gila.Task) bool {
             .lte => @intFromEnum(task.priority) <= @intFromEnum(priority.value),
             .gte => @intFromEnum(task.priority) >= @intFromEnum(priority.value),
         };
-        if (condition) return true;
+        if (!condition) return false;
     }
 
     if (self.priority_value) |priority_value| {
@@ -182,7 +185,7 @@ pub fn testTask(self: Find, task: gila.Task) bool {
             .lte => task.priority_value <= priority_value.value,
             .gte => task.priority_value >= priority_value.value,
         };
-        if (condition) return true;
+        if (!condition) return false;
     }
 
     if (self.tags) |tags| fail: {
@@ -190,17 +193,17 @@ pub fn testTask(self: Find, task: gila.Task) bool {
             .@"and" => {
                 if (task.tags) |task_tags| {
                     for (tags.tag_list.strings) |tag| {
-                        if (!find(task_tags, tag)) break :fail;
+                        if (!find(task_tags, tag)) return false;
                     }
-                } else break :fail;
-                return true;
+                } else return false;
             },
             .@"or" => {
                 if (task.tags) |task_tags| {
                     for (tags.tag_list.strings) |tag| {
-                        if (find(task_tags, tag)) return true;
+                        if (find(task_tags, tag)) break :fail;
                     }
-                } else break :fail;
+                }
+                return false;
             },
         }
     }
@@ -209,21 +212,21 @@ pub fn testTask(self: Find, task: gila.Task) bool {
             .@"and" => {
                 if (task.waiting_on) |task_waiting_on| {
                     for (waiting_on.task_list.tasks) |waiting_on_task| {
-                        if (!find(task_waiting_on, waiting_on_task)) break :fail;
+                        if (!find(task_waiting_on, waiting_on_task)) return false;
                     }
-                } else break :fail;
+                } else return false;
                 return true;
             },
             .@"or" => {
                 if (task.waiting_on) |task_waiting_on| {
                     for (waiting_on.task_list.tasks) |waiting_on_task| {
-                        if (find(task_waiting_on, waiting_on_task)) return true;
+                        if (find(task_waiting_on, waiting_on_task)) break :fail;
                     }
-                } else break :fail;
+                } else return false;
             },
         }
     }
-    return false;
+    return true;
 }
 
 pub fn parseTask(

@@ -247,7 +247,7 @@ pub const PriorityValueFilter = struct {
             data = flag_value[pos + 1 ..];
         }
         result.value = std.fmt.parseInt(u8, data, 10) catch {
-            error_out.* = "Invalid value provided in flag value. Must be a number and <= 255";
+            error_out.* = "Invalid value provided for priority_value. Must be a number and <= 255";
             return error.Invalid;
         };
         return result;

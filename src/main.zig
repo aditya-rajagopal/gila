@@ -28,6 +28,17 @@ const default_log_level: std.log.Level = switch (builtin.mode) {
 
 pub var log_level: std.log.Level = default_log_level;
 
+const tuig = @import("tuig");
+const Terminal = tuig.Terminal;
+
+pub var global_tty: ?*Terminal = null;
+pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
+    if (global_tty) |tty| {
+        tty.deinit();
+    }
+    std.debug.defaultPanic(msg, ret_addr);
+}
+
 pub fn logFn(
     comptime level: std.log.Level,
     comptime scope: @EnumLiteral(),

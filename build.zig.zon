@@ -9,6 +9,10 @@
             .url = "git+https://github.com/aditya-rajagopal/stdx.git#01f7c09b669eece4ed7f7a70f7bc87f3f736a243",
             .hash = "stdx-0.0.0-JEHEYdvyAwCdDlKxhCd8hdrmvDhbyR-1KyRxZPQ3YXqX",
         },
+        .tuig = .{
+            .url = "git+https://github.com/aditya-rajagopal/tuig.git#22a9018b1bfb06d4684a101b8f4d87b7eea9c058",
+            .hash = "tuig-0.0.1-G-27rG9LAQAIkV5OAtAQspBD26Gy5aLVcnAjrlbVTB2O",
+        },
     },
     .paths = .{""},
 }

@@ -213,6 +213,15 @@ pub fn getPriority(params: std.json.ObjectMap, key: []const u8) ?gila.Priority {
     };
 }
 
+const Direction = common.Direction;
+pub fn getDirection(params: std.json.ObjectMap, key: []const u8) Direction {
+    const val = params.get(key) orelse return .eq;
+    return switch (val) {
+        .string => |s| std.meta.stringToEnum(Direction, s) orelse .eq,
+        else => .eq,
+    };
+}
+
 pub fn getStatus(params: std.json.ObjectMap, key: []const u8) ?gila.Status {
     const val = params.get(key) orelse return null;
     return switch (val) {
@@ -245,7 +254,8 @@ pub fn getPositiveI64(params: std.json.ObjectMap, key: []const u8) ?i64 {
     };
 }
 
-pub const Op = @import("find.zig").Op;
+const common = @import("common.zig");
+pub const Op = common.Op;
 
 pub fn getOp(params: std.json.ObjectMap, key: []const u8) Op {
     const val = params.get(key) orelse return .@"or";
@@ -255,95 +265,75 @@ pub fn getOp(params: std.json.ObjectMap, key: []const u8) Op {
     };
 }
 
-pub const Field = enum {
-    id,
-    status,
-    title,
-    priority,
-    priority_value,
-    owner,
-    created,
-    completed,
-    description,
-    tags,
-    waiting_on,
-    file_path,
-};
+pub const default_fields: gila.Task.TaskFieldSelection = .{ .id = true, .status = true, .title = true };
 
-pub const default_fields: []const Field = &.{ .id, .status, .title };
-
-pub fn getFields(params: std.json.ObjectMap, allocator: std.mem.Allocator) []const Field {
+pub fn getFields(params: std.json.ObjectMap) gila.Task.TaskFieldSelection {
     const val = params.get("fields") orelse return default_fields;
     return switch (val) {
         .array => |arr| {
-            var result = allocator.alloc(Field, arr.items.len) catch return default_fields;
-            var count: usize = 0;
+            var result: gila.Task.TaskFieldSelection = .{};
             for (arr.items) |item| {
                 switch (item) {
                     .string => |s| {
-                        if (std.meta.stringToEnum(Field, s)) |f| {
-                            result[count] = f;
-                            count += 1;
-                        }
+                        if (std.meta.stringToEnum(gila.Task.TaskField, s)) |f| switch (f) {
+                            inline else => |v| @field(result, @tagName(v)) = true,
+                        };
                     },
                     else => {},
                 }
             }
-            if (count == 0) return default_fields;
-            return result[0..count];
+            return result;
         },
         else => default_fields,
     };
 }
 
-pub fn hasField(fields: []const Field, field: Field) bool {
-    for (fields) |f| {
-        if (f == field) return true;
-    }
-    return false;
-}
-
-pub fn writeTaskFields(jw: *std.json.Stringify, task: gila.Task, file_path: []const u8, fields: []const Field) !void {
+pub fn writeTaskFields(
+    jw: *std.json.Stringify,
+    task: gila.Task,
+    file_path: []const u8,
+    fields: gila.Task.TaskFieldSelection,
+) !void {
     try jw.beginObject();
 
-    if (hasField(fields, .id)) {
+    if (fields.id) {
         try jw.objectField("task_id");
         try jw.write(task.id);
     }
 
-    if (hasField(fields, .title)) {
+    if (fields.title) {
         try jw.objectField("title");
         try jw.write(task.title);
     }
 
-    if (hasField(fields, .status)) {
+    if (fields.status) {
         try jw.objectField("status");
         try jw.write(@tagName(task.status));
     }
 
-    if (hasField(fields, .priority)) {
+    if (fields.priority) {
         try jw.objectField("priority");
         try jw.write(@tagName(task.priority));
     }
 
-    if (hasField(fields, .priority_value)) {
+    if (fields.priority_value) {
         try jw.objectField("priority_value");
         try jw.write(task.priority_value);
     }
 
-    if (hasField(fields, .owner)) {
+    if (fields.owner) {
         try jw.objectField("owner");
         try jw.write(task.owner);
     }
 
-    if (hasField(fields, .created)) {
+    if (fields.created) {
         try jw.objectField("created");
         var created_buf: [32]u8 = undefined;
         const created_str = try std.fmt.bufPrint(&created_buf, "{f}", .{task.created.as(.@"YYYY-MM-DDTHH:MM:SSZ")});
         try jw.write(created_str);
     }
 
-    if (hasField(fields, .completed)) {
+    if (fields.completed) {
         try jw.objectField("completed");
         if (task.completed) |completed| {
             var completed_buf: [32]u8 = undefined;
@@ -354,7 +344,7 @@ pub fn writeTaskFields(jw: *std.json.Stringify, task: gila.Task, file_path: []co
         }
     }
 
-    if (hasField(fields, .tags)) {
+    if (fields.tags) {
         try jw.objectField("tags");
         if (task.tags) |tags| {
             try jw.beginArray();
@@ -367,7 +357,7 @@ pub fn writeTaskFields(jw: *std.json.Stringify, task: gila.Task, file_path: []co
         }
     }
 
-    if (hasField(fields, .waiting_on)) {
+    if (fields.waiting_on) {
         try jw.objectField("waiting_on");
         if (task.waiting_on) |waiting_on| {
             try jw.beginArray();
@@ -380,15 +370,13 @@ pub fn writeTaskFields(jw: *std.json.Stringify, task: gila.Task, file_path: []co
         }
     }
 
-    if (hasField(fields, .description)) {
+    if (fields.description) {
         try jw.objectField("description");
         try jw.write(task.description);
     }
 
-    if (hasField(fields, .file_path)) {
-        try jw.objectField("file_path");
-        try jw.write(file_path);
-    }
+    try jw.objectField("file_path");
+    try jw.write(file_path);
 
     try jw.endObject();
 }

@@ -3,7 +3,7 @@ const gila = @import("gila");
 const stdx = @import("stdx");
 
 const common = @import("common.zig");
-const rpc = @import("rpc.zig");
+const rpc = @import("server_rpc.zig");
 
 const log = std.log.scoped(.handlers);
 
@@ -107,7 +107,7 @@ fn handleTaskCreate(self: Handler) void {
         .description = description,
         .priority = priority,
         .priority_value = priority_value,
-        .tags = if (tags) |t| .{ .tags = t } else null,
+        .tags = if (tags) |t| .{ .strings = t } else null,
         .waiting_on = if (waiting_on) |w| .{ .tasks = w } else null,
         .blocks = if (blocks) |b| .{ .tasks = b } else null,
         .positional = .{ .title = title },
@@ -273,6 +273,9 @@ fn handleTaskFind(self: Handler) void {
     if (p != .object) return self.fail(.invalid_params, "Params must be an object");
 
     const filter_priority = rpc.getPriority(p.object, "priority");
+    const filter_priority_direction = rpc.getDirection(p.object, "priority_direction");
+    const filter_priority_value = rpc.getU8(p.object, "priority_value");
+    const filter_priority_value_direction = rpc.getDirection(p.object, "priority_value_direction");
     const filter_status = rpc.getStatus(p.object, "status");
     const filter_tags = rpc.getStringArray(p.object, "tags", allocator);
     const tags_op = rpc.getOp(p.object, "tags_op");
@@ -280,15 +283,23 @@ fn handleTaskFind(self: Handler) void {
     const waiting_on_op = rpc.getOp(p.object, "waiting_on_op");
     const limit = rpc.getPositiveI64(p.object, "limit") orelse std.math.maxInt(i64);
     const offset = rpc.getPositiveI64(p.object, "offset") orelse 0;
-    const fields = rpc.getFields(p.object, allocator);
+    const fields = rpc.getFields(p.object);
 
     var find_arena = stdx.Arena.init(allocator, 512 * 1024, null) catch return self.failInternal("Failed to allocate find buffer");
     const Find = @import("find.zig");
     const find = Find{
-        .priority = filter_priority,
+        .status = filter_status,
+        .priority = if (filter_priority) |pr| .{
+            .direction = filter_priority_direction,
+            .value = pr,
+        } else null,
+        .priority_value = if (filter_priority_value) |pv| .{
+            .direction = filter_priority_value_direction,
+            .value = pv,
+        } else null,
         .tags = if (filter_tags) |t| .{
             .op = tags_op,
-            .tag_list = .{ .tags = t },
+            .tag_list = .{ .strings = t },
         } else null,
         .waiting_on = if (filter_waiting_on) |w| .{
             .op = waiting_on_op,
@@ -319,7 +330,6 @@ fn handleTaskFind(self: Handler) void {
             skipped += 1;
             continue;
         }
-        if (filter_status) |s| if (entry.status != s) continue;
         _ = local_arena.reset(false);
         const task_file = self.gila_dir.openFile(self.io, entry.path, .{ .mode = .read_only }) catch continue;
         defer task_file.close(self.io);
@@ -327,7 +337,7 @@ fn handleTaskFind(self: Handler) void {
         var task: gila.Task = gila.Task.init(entry.path[last_slash + 1 .. entry.path.len - 3]) catch unreachable;
         task.fromFile(task_file, self.io, &local_arena) catch continue;
 
-        const task_copy = copyTask(allocator, task) catch continue;
+        const task_copy = task.dupe(allocator, fields) catch continue;
         found_tasks.append(allocator, .{ .task = task_copy, .file_path = entry.path }) catch continue;
         count += 1;
         if (limit <= count) break;
@@ -464,31 +474,4 @@ fn extractTaskId(ref: []const u8) ?[]const u8 {
     if (!std.mem.startsWith(u8, ref, "\"[[")) return null;
     if (!std.mem.endsWith(u8, ref, "]]\"")) return null;
     return ref[3 .. ref.len - 3];
-}
-
-fn copyTask(allocator: std.mem.Allocator, task: gila.Task) !gila.Task {
-    var copy = task;
-    copy.id = try allocator.dupe(u8, task.id);
-    copy.title = try allocator.dupe(u8, task.title);
-    if (task.description.len > 0) {
-        copy.description = try allocator.dupe(u8, task.description);
-    }
-    if (task.owner.len > 0) {
-        copy.owner = try allocator.dupe(u8, task.owner);
-    }
-    if (task.tags) |tags| {
-        const new_tags = try allocator.alloc([]const u8, tags.len);
-        for (tags, 0..) |tag, i| {
-            new_tags[i] = try allocator.dupe(u8, tag);
-        }
-        copy.tags = new_tags;
-    }
-    if (task.waiting_on) |waiting| {
-        const new_waiting = try allocator.alloc([]const u8, waiting.len);
-        for (waiting, 0..) |w, i| {
-            new_waiting[i] = try allocator.dupe(u8, w);
-        }
-        copy.waiting_on = new_waiting;
-    }
-    return copy;
 }

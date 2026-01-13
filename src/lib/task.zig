@@ -207,6 +207,36 @@ fn parseValue(
     }
 }
 
+pub const TaskFieldSelection = std.enums.EnumFieldStruct(std.meta.FieldEnum(Task), bool, false);
+pub const TaskField = std.meta.FieldEnum(Task);
+
+pub fn dupe(task: gila.Task, allocator: std.mem.Allocator, fields: TaskFieldSelection) !gila.Task {
+    var copy = task;
+    if (fields.id) copy.id = try allocator.dupe(u8, task.id) else copy.id = &.{};
+    if (fields.title) copy.title = try allocator.dupe(u8, task.title) else copy.title = &.{};
+    if (fields.description) copy.description = try allocator.dupe(u8, task.description) else copy.description = &.{};
+    if (fields.owner) copy.owner = try allocator.dupe(u8, task.owner) else copy.owner = &.{};
+    if (fields.tags) {
+        if (task.tags) |tags| {
+            const new_tags = try allocator.alloc([]const u8, tags.len);
+            for (tags, 0..) |tag, i| {
+                new_tags[i] = try allocator.dupe(u8, tag);
+            }
+            copy.tags = new_tags;
+        }
+    } else copy.tags = null;
+    if (fields.waiting_on) {
+        if (task.waiting_on) |waiting| {
+            const new_waiting = try allocator.alloc([]const u8, waiting.len);
+            for (waiting, 0..) |w, i| {
+                new_waiting[i] = try allocator.dupe(u8, w);
+            }
+            copy.waiting_on = new_waiting;
+        }
+    }
+    return copy;
+}
+
 pub const FindAndReadResult = struct {
     task: Task,
     status: gila.Status,

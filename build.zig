@@ -7,6 +7,7 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
     const stdx = b.dependency("stdx", .{ .target = target }).module("stdx");
+    const tuig = b.dependency("tuig", .{ .target = target }).module("tuig");
 
     const test_fs_mod = b.createModule(.{
         .root_source_file = b.path("src/testfs/root.zig"),
@@ -31,6 +32,7 @@ pub fn build(b: *std.Build) void {
         .{ .name = "zon", .module = zon_mod },
         .{ .name = "stdx", .module = stdx },
         .{ .name = "test_fs", .module = test_fs_mod },
+        .{ .name = "tuig", .module = tuig },
     } });
 
     const exe = b.addExecutable(.{

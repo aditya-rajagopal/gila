@@ -14,6 +14,7 @@ const Done = @import("commands/done.zig");
 const Sync = @import("commands/sync.zig");
 const Find = @import("commands/find.zig");
 const Server = @import("commands/server.zig");
+const Pick = @import("commands/pick.zig");
 
 pub const std_options: std.Options = .{
     .log_level = default_log_level,
@@ -26,6 +27,17 @@ const default_log_level: std.log.Level = switch (builtin.mode) {
 };
 
 pub var log_level: std.log.Level = default_log_level;
+
+const tuig = @import("tuig");
+const Terminal = tuig.Terminal;
+
+pub var global_tty: ?*Terminal = null;
+pub fn panic(msg: []const u8, _: ?*std.builtin.StackTrace, ret_addr: ?usize) noreturn {
+    if (global_tty) |tty| {
+        tty.deinit();
+    }
+    std.debug.defaultPanic(msg, ret_addr);
+}
 
 pub fn logFn(
     comptime level: std.log.Level,
@@ -74,6 +86,7 @@ const CLIArgs = union(enum) {
     done: Done,
     sync: Sync,
     find: Find,
+    pick: Pick,
     server: Server,
     version,
 
@@ -173,6 +186,7 @@ pub fn main(env: std.process.Init.Minimal) void {
         .sync => |sync| sync.execute(context),
         .find => |find| find.execute(context),
         .server => |server| server.execute(context),
+        .pick => |pick| pick.execute(context),
         .version => {
             var stdout = std.Io.File.stdout().writer(io, &.{});
             stdout.interface.print("v{s}\n", .{zon.version}) catch |err| {

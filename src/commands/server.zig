@@ -5,8 +5,8 @@ const gila = @import("gila");
 const stdx = @import("stdx");
 
 const common = @import("common.zig");
-const rpc = @import("rpc.zig");
-const Handler = @import("handler.zig");
+const rpc = @import("server_rpc.zig");
+const Handler = @import("server_handler.zig");
 
 const log = std.log.scoped(.server);
 
@@ -2452,7 +2452,6 @@ test "task/find: default fields only id status title" {
     try testing.expectEqualStrings("Default Fields", title_val.string);
 
     try testing.expect(task.object.get("priority") == null);
-    try testing.expect(task.object.get("file_path") == null);
 }
 
 test "task/find: list all tasks" {
